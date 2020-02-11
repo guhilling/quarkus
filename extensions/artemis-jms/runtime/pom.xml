@@ -11,11 +11,18 @@
 
     <artifactId>quarkus-artemis-jms</artifactId>
     <name>Quarkus - Artemis - JMS - Runtime</name>
+    <description>Use ActiveMQ Artemis as a JMS implementation</description>
 
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-artemis-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <dependency>

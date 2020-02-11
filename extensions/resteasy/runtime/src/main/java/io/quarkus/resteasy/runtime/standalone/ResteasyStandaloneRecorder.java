@@ -1,9 +1,13 @@
 package io.quarkus.resteasy.runtime.standalone;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
-import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.ResteasyDeployment;
 
 import io.netty.buffer.ByteBuf;
@@ -12,9 +16,10 @@ import io.quarkus.arc.runtime.BeanContainer;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
+import io.quarkus.vertx.http.runtime.ThreadLocalHandler;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
-import io.vertx.ext.web.Router;
+import io.vertx.ext.web.Route;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.StaticHandler;
 
@@ -24,7 +29,6 @@ import io.vertx.ext.web.handler.StaticHandler;
 @Recorder
 public class ResteasyStandaloneRecorder {
 
-    private static final Logger log = Logger.getLogger("io.quarkus.resteasy");
     public static final String META_INF_RESOURCES = "META-INF/resources";
 
     /**
@@ -33,15 +37,6 @@ public class ResteasyStandaloneRecorder {
     protected static final int BUFFER_SIZE = 8 * 1024;
 
     private static boolean useDirect = true;
-
-    private static Handler<RoutingContext> ROOT_HANDLER = new Handler<RoutingContext>() {
-        @Override
-        public void handle(RoutingContext httpServerRequest) {
-            currentRoot.handle(httpServerRequest);
-        }
-    };
-
-    private volatile static Handler<RoutingContext> currentRoot = null;
 
     //TODO: clean this up
     private static BufferAllocator ALLOCATOR = new BufferAllocator() {
@@ -82,39 +77,50 @@ public class ResteasyStandaloneRecorder {
     }
 
     private static ResteasyDeployment deployment;
+    private static Set<String> knownPaths;
+    private static String contextPath;
 
-    public void setupDeployment(ResteasyDeployment dep) {
-        deployment = dep;
-        deployment.start();
-
+    public void staticInit(ResteasyDeployment dep, String path, Set<String> known) {
+        if (dep != null) {
+            deployment = dep;
+            deployment.start();
+        }
+        knownPaths = known;
+        contextPath = path;
     }
 
-    public Handler<RoutingContext> startResteasy(RuntimeValue<Vertx> vertxValue,
-            String contextPath,
+    public Consumer<Route> start(RuntimeValue<Vertx> vertx,
             ShutdownContext shutdown,
             BeanContainer beanContainer,
-            boolean hasClasspathResources,
-            boolean isVirtual) throws Exception {
+            boolean isVirtual, boolean isDefaultResourcesPath,
+            Executor executor) {
 
         shutdown.addShutdownTask(new Runnable() {
             @Override
             public void run() {
-                deployment.stop();
+                if (deployment != null) {
+                    deployment.stop();
+                }
             }
         });
-        Vertx vertx = vertxValue.getValue();
         useDirect = !isVirtual;
+        List<Handler<RoutingContext>> handlers = new ArrayList<>();
 
-        Router router = null;
         if (hotDeploymentResourcePaths != null && !hotDeploymentResourcePaths.isEmpty()) {
-            router = router == null ? Router.router(vertx) : router;
             for (Path resourcePath : hotDeploymentResourcePaths) {
                 String root = resourcePath.toAbsolutePath().toString();
-                StaticHandler staticHandler = StaticHandler.create();
-                staticHandler.setCachingEnabled(false);
-                staticHandler.setAllowRootFileSystemAccess(true);
-                staticHandler.setWebRoot(root);
-                router.route().handler(event -> {
+                ThreadLocalHandler staticHandler = new ThreadLocalHandler(new Supplier<Handler<RoutingContext>>() {
+                    @Override
+                    public Handler<RoutingContext> get() {
+                        StaticHandler staticHandler = StaticHandler.create();
+                        staticHandler.setCachingEnabled(false);
+                        staticHandler.setAllowRootFileSystemAccess(true);
+                        staticHandler.setWebRoot(root);
+                        staticHandler.setDefaultContentEncoding("UTF-8");
+                        return staticHandler;
+                    }
+                });
+                handlers.add(event -> {
                     try {
                         staticHandler.handle(event);
                     } catch (Exception e) {
@@ -125,28 +131,45 @@ public class ResteasyStandaloneRecorder {
                 });
             }
         }
-        if (hasClasspathResources) {
-            router = router == null ? Router.router(vertx) : router;
-            router.route().handler(StaticHandler.create(META_INF_RESOURCES));
-        }
-
-        VertxRequestHandler requestHandler = new VertxRequestHandler(vertx, beanContainer, deployment, contextPath, ALLOCATOR);
-
-        // We don't to add a Router if we don't have to
-        if (router == null) {
-            currentRoot = requestHandler;
-        } else {
-            router.route().handler(requestHandler);
-            Router finalRouter = router;
-            currentRoot = new Handler<RoutingContext>() {
+        if (!knownPaths.isEmpty()) {
+            ThreadLocalHandler staticHandler = new ThreadLocalHandler(new Supplier<Handler<RoutingContext>>() {
                 @Override
-                public void handle(RoutingContext event) {
-                    finalRouter.handle(event.request());
+                public Handler<RoutingContext> get() {
+                    return StaticHandler.create(META_INF_RESOURCES)
+                            .setDefaultContentEncoding("UTF-8");
                 }
-            };
+            });
+            handlers.add(ctx -> {
+                String rel = ctx.mountPoint() == null ? ctx.normalisedPath()
+                        : ctx.normalisedPath().substring(ctx.mountPoint().length());
+                if (knownPaths.contains(rel)) {
+                    staticHandler.handle(ctx);
+                } else {
+                    ctx.next();
+                }
+            });
         }
 
-        return ROOT_HANDLER;
+        if (deployment != null && isDefaultResourcesPath) {
+            handlers.add(vertxRequestHandler(vertx, beanContainer, executor));
+        }
+        return new Consumer<Route>() {
+
+            @Override
+            public void accept(Route route) {
+                for (Handler<RoutingContext> i : handlers) {
+                    route.handler(i);
+                }
+            }
+        };
+    }
+
+    public Handler<RoutingContext> vertxRequestHandler(RuntimeValue<Vertx> vertx,
+            BeanContainer beanContainer, Executor executor) {
+        if (deployment != null) {
+            return new VertxRequestHandler(vertx.getValue(), beanContainer, deployment, contextPath, ALLOCATOR, executor);
+        }
+        return null;
     }
 
 }

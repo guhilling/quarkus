@@ -3,62 +3,39 @@ package io.quarkus.hibernate.search.elasticsearch;
 import java.util.Arrays;
 import java.util.List;
 
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.AbstractCompositeAnalysisDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.AnalysisDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.AnalysisDefinitionJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.AnalyzerDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.AnalyzerDefinitionJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.CharFilterDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.NormalizerDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.NormalizerDefinitionJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.TokenFilterDefinition;
-import org.hibernate.search.backend.elasticsearch.analysis.model.impl.esnative.TokenizerDefinition;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.AbstractTypeMapping;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.AbstractTypeMappingJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.DynamicType;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.ElasticsearchFormatJsonAdapter;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.ElasticsearchRoutingTypeJsonAdapter;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.PropertyMapping;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.PropertyMappingJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.RootTypeMapping;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.RootTypeMappingJsonAdapterFactory;
-import org.hibernate.search.backend.elasticsearch.document.model.impl.esnative.RoutingType;
-import org.hibernate.search.backend.elasticsearch.index.settings.impl.esnative.Analysis;
-import org.hibernate.search.backend.elasticsearch.index.settings.impl.esnative.IndexSettings;
-import org.hibernate.search.mapper.pojo.bridge.mapping.annotation.declaration.MarkerBinding;
-import org.hibernate.search.mapper.pojo.bridge.mapping.annotation.declaration.PropertyBinding;
-import org.hibernate.search.mapper.pojo.bridge.mapping.annotation.declaration.RoutingKeyBinding;
-import org.hibernate.search.mapper.pojo.bridge.mapping.annotation.declaration.TypeBinding;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.AssociationInverseSide;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.DocumentId;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.FullTextField;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.GenericField;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.AbstractCompositeAnalysisDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.AnalysisDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.AnalysisDefinitionJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.AnalyzerDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.AnalyzerDefinitionJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.CharFilterDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.NormalizerDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.NormalizerDefinitionJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.TokenFilterDefinition;
+import org.hibernate.search.backend.elasticsearch.analysis.model.esnative.impl.TokenizerDefinition;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.AbstractTypeMapping;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.AbstractTypeMappingJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.DynamicType;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.ElasticsearchFormatJsonAdapter;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.ElasticsearchRoutingTypeJsonAdapter;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.PropertyMapping;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.PropertyMappingJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.RootTypeMapping;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.RootTypeMappingJsonAdapterFactory;
+import org.hibernate.search.backend.elasticsearch.document.model.esnative.impl.RoutingType;
+import org.hibernate.search.backend.elasticsearch.index.settings.esnative.impl.Analysis;
+import org.hibernate.search.backend.elasticsearch.index.settings.esnative.impl.IndexSettings;
 import org.hibernate.search.mapper.pojo.mapping.definition.annotation.Indexed;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.IndexedEmbedded;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.KeywordField;
-import org.hibernate.search.mapper.pojo.mapping.definition.annotation.ScaledNumberField;
+import org.hibernate.search.mapper.pojo.mapping.definition.annotation.processing.TypeMapping;
 import org.jboss.jandex.DotName;
 
 class HibernateSearchClasses {
 
     static final DotName INDEXED = DotName.createSimple(Indexed.class.getName());
 
-    static final List<DotName> FIELD_ANNOTATIONS = Arrays.asList(
-            DotName.createSimple(DocumentId.class.getName()),
-            DotName.createSimple(GenericField.class.getName()),
-            DotName.createSimple(FullTextField.class.getName()),
-            DotName.createSimple(KeywordField.class.getName()),
-            DotName.createSimple(ScaledNumberField.class.getName()),
-            DotName.createSimple(IndexedEmbedded.class.getName()),
-            DotName.createSimple(AssociationInverseSide.class.getName()));
-
-    static final List<DotName> BINDING_DECLARATION_ANNOTATIONS_ON_PROPERTIES = Arrays.asList(
-            DotName.createSimple(PropertyBinding.class.getName()),
-            DotName.createSimple(MarkerBinding.class.getName()));
-
-    static final List<DotName> BINDING_DECLARATION_ANNOTATIONS_ON_TYPES = Arrays.asList(
-            DotName.createSimple(TypeBinding.class.getName()),
-            DotName.createSimple(RoutingKeyBinding.class.getName()));
+    static final DotName PROPERTY_MAPPING_META_ANNOTATION = DotName.createSimple(
+            org.hibernate.search.mapper.pojo.mapping.definition.annotation.processing.PropertyMapping.class.getName());
+    static final DotName TYPE_MAPPING_META_ANNOTATION = DotName.createSimple(TypeMapping.class.getName());
 
     static final List<DotName> SCHEMA_MAPPING_CLASSES = Arrays.asList(
             DotName.createSimple(AbstractTypeMapping.class.getName()),

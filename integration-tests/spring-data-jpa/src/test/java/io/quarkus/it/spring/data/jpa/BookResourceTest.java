@@ -65,4 +65,43 @@ public class BookResourceTest {
                 .body(containsString("Upheaval"))
                 .body(containsString("Sapiens"));
     }
+
+    @Test
+    void testByName() {
+        when().get("/book/name/Sapiens").then()
+                .statusCode(200)
+                .body(containsString("Sapiens"));
+    }
+
+    @Test
+    void testByYear() {
+        when().get("/book/year/2012").then()
+                .statusCode(200)
+                .body(containsString("Sleepwalkers"));
+        when().get("/book/year/2050").then()
+                .statusCode(204);
+    }
+
+    @Test
+    void testByNameNotFound() {
+        when().get("/book/name/DoesNotExist").then()
+                .statusCode(200)
+                .body("size()", is(0));
+    }
+
+    @Test
+    void testCountAllByPublicationYear() {
+        when().get("/book/count/year").then()
+                .statusCode(200)
+                .contentType("application/json")
+                .body(containsString("publicationYear"));
+    }
+
+    @Test
+    void testCountAllByPublicationYear2() {
+        when().get("/book/count/year2").then()
+                .statusCode(200)
+                .contentType("application/json")
+                .body(containsString("publicationYear"));
+    }
 }

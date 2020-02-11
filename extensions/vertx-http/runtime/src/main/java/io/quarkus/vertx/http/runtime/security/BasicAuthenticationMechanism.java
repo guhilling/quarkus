@@ -29,6 +29,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.regex.Pattern;
 
+import javax.inject.Singleton;
+
 import org.jboss.logging.Logger;
 
 import io.netty.handler.codec.http.HttpHeaderNames;
@@ -43,9 +45,9 @@ import io.vertx.ext.web.RoutingContext;
 /**
  * The authentication handler responsible for BASIC authentication as described by RFC2617
  *
- * @author <a href="mailto:darran.lofthouse@jboss.com">Darran Lofthouse</a>
  */
-public class BasicAuthenticationMechanism implements HTTPAuthenticationMechanism {
+@Singleton
+public class BasicAuthenticationMechanism implements HttpAuthenticationMechanism {
 
     private static final Logger log = Logger.getLogger(BasicAuthenticationMechanism.class);
 
@@ -160,17 +162,19 @@ public class BasicAuthenticationMechanism implements HTTPAuthenticationMechanism
     }
 
     @Override
-    public CompletionStage<Boolean> sendChallenge(RoutingContext context) {
+    public CompletionStage<ChallengeData> getChallenge(RoutingContext context) {
         if (silent) {
             //if this is silent we only send a challenge if the request contained auth headers
             //otherwise we assume another method will send the challenge
             String authHeader = context.request().headers().get(HttpHeaderNames.AUTHORIZATION);
             if (authHeader == null) {
-                return CompletableFuture.completedFuture(false);
+                return CompletableFuture.completedFuture(null);
             }
         }
-        context.response().headers().set(HttpHeaderNames.WWW_AUTHENTICATE, challenge);
-        context.response().setStatusCode(HttpResponseStatus.UNAUTHORIZED.code());
-        return CompletableFuture.completedFuture(true);
+        ChallengeData result = new ChallengeData(
+                HttpResponseStatus.UNAUTHORIZED.code(),
+                HttpHeaderNames.WWW_AUTHENTICATE,
+                challenge);
+        return CompletableFuture.completedFuture(result);
     }
 }

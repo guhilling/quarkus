@@ -16,12 +16,14 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.Set;
 
+import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
@@ -82,6 +84,11 @@ public class TestResourceManager {
                 throw new RuntimeException("Unable to stop Quarkus test resource " + testResource, e);
             }
         }
+        try {
+            ConfigProviderResolver cpr = ConfigProviderResolver.instance();
+            cpr.releaseConfig(cpr.getConfig());
+        } catch (Throwable ignored) {
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -90,7 +97,13 @@ public class TestResourceManager {
 
         Set<Class<? extends QuarkusTestResourceLifecycleManager>> testResourceRunnerClasses = new LinkedHashSet<>();
 
-        for (AnnotationInstance annotation : index.getAnnotations(DotName.createSimple(QuarkusTestResource.class.getName()))) {
+        Set<AnnotationInstance> testResourceAnnotations = new HashSet<>();
+        testResourceAnnotations.addAll(index.getAnnotations(DotName.createSimple(QuarkusTestResource.class.getName())));
+        for (AnnotationInstance annotation : index
+                .getAnnotations(DotName.createSimple(QuarkusTestResource.List.class.getName()))) {
+            Collections.addAll(testResourceAnnotations, annotation.value().asNestedArray());
+        }
+        for (AnnotationInstance annotation : testResourceAnnotations) {
             try {
                 testResourceRunnerClasses.add((Class<? extends QuarkusTestResourceLifecycleManager>) Class
                         .forName(annotation.value().asString()));

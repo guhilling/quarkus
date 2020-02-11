@@ -13,28 +13,30 @@ import org.junit.Before;
 /**
  * Note that we cannot use event.getExecutor().invoke() directly because the callbacks would be invoked upon the original test
  * class instance and not the real test instance.
- * 
- * TODO TestNG callbacks?
+ * <p>
+ * This class works for JUnit callbacks only, see {@link QuarkusTestNgCallbacks} for TestNG
  */
 class QuarkusJunitCallbacks {
 
-    static void invokeBefores() throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
-        Object testInstance = QuarkusDeployableContainer.testInstance;
+    static void invokeJunitBefores(Object testInstance)
+            throws IllegalAccessException, IllegalArgumentException, InvocationTargetException, ClassNotFoundException {
         // if there is no managed deployment, then we have no test instance because it hasn't been deployed yet
         if (testInstance != null) {
             List<Method> befores = new ArrayList<>();
-            collectCallbacks(testInstance.getClass(), befores, Before.class);
+            collectCallbacks(testInstance.getClass(), befores, (Class<? extends Annotation>) testInstance.getClass()
+                    .getClassLoader().loadClass(Before.class.getName()));
             for (Method before : befores) {
                 before.invoke(testInstance);
             }
         }
     }
 
-    static void invokeAfters() throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
-        Object testInstance = QuarkusDeployableContainer.testInstance;
+    static void invokeJunitAfters(Object testInstance)
+            throws IllegalAccessException, IllegalArgumentException, InvocationTargetException, ClassNotFoundException {
         if (testInstance != null) {
             List<Method> afters = new ArrayList<>();
-            collectCallbacks(testInstance.getClass(), afters, After.class);
+            collectCallbacks(testInstance.getClass(), afters, (Class<? extends Annotation>) testInstance.getClass()
+                    .getClassLoader().loadClass(After.class.getName()));
             for (Method after : afters) {
                 after.invoke(testInstance);
             }
@@ -42,7 +44,7 @@ class QuarkusJunitCallbacks {
     }
 
     private static void collectCallbacks(Class<?> testClass, List<Method> callbacks, Class<? extends Annotation> annotation) {
-        Arrays.stream(testClass.getMethods()).filter(m -> m.isAnnotationPresent(annotation)).forEach(callbacks::add);
+        Arrays.stream(testClass.getDeclaredMethods()).filter(m -> m.isAnnotationPresent(annotation)).forEach(callbacks::add);
         Class<?> superClass = testClass.getSuperclass();
         if (superClass != null && !superClass.equals(Object.class)) {
             collectCallbacks(superClass, callbacks, annotation);

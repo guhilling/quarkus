@@ -121,7 +121,7 @@ public class VertxHttpResponse implements HttpResponse {
                 if (delegate != null) {
                     response.headers().add(key, delegate.toString(value));
                 } else {
-                    response.headers().set(key, value.toString());
+                    response.headers().add(key, value.toString());
                 }
             }
         }
@@ -129,7 +129,7 @@ public class VertxHttpResponse implements HttpResponse {
 
     public void finish() throws IOException {
         checkException();
-        if (finished)
+        if (finished || response.ended())
             return;
         try {
             if (os != null) {

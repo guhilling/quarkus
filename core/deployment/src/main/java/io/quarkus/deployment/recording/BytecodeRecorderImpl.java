@@ -14,7 +14,6 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -43,7 +42,6 @@ import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 import org.wildfly.common.Assert;
 
-import io.quarkus.deployment.ClassOutput;
 import io.quarkus.deployment.proxy.ProxyConfiguration;
 import io.quarkus.deployment.proxy.ProxyFactory;
 import io.quarkus.deployment.recording.AnnotationProxyProvider.AnnotationProxy;
@@ -52,6 +50,7 @@ import io.quarkus.gizmo.AssignableResultHandle;
 import io.quarkus.gizmo.BytecodeCreator;
 import io.quarkus.gizmo.CatchBlockCreator;
 import io.quarkus.gizmo.ClassCreator;
+import io.quarkus.gizmo.ClassOutput;
 import io.quarkus.gizmo.FieldDescriptor;
 import io.quarkus.gizmo.MethodCreator;
 import io.quarkus.gizmo.MethodDescriptor;
@@ -238,6 +237,18 @@ public class BytecodeRecorderImpl implements RecorderContext {
             T recordingProxy = factory.newInstance(new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                    if (staticInit) {
+                        for (int i = 0; i < args.length; ++i) {
+                            if (args[i] instanceof ReturnedProxy) {
+                                ReturnedProxy p = (ReturnedProxy) args[i];
+                                if (!p.__static$$init()) {
+                                    throw new RuntimeException("Invalid proxy passed to recorder. Parameter " + i + " of type "
+                                            + method.getParameterTypes()[i]
+                                            + " was created in a runtime recorder method, while this recorder is for a static init method. The object will not have been created at the time this method is run.");
+                                }
+                            }
+                        }
+                    }
                     StoredMethodCall storedMethodCall = new StoredMethodCall(theClass, method, args);
                     storedMethodCalls.add(storedMethodCall);
                     Class<?> returnType = method.getReturnType();
@@ -256,8 +267,9 @@ public class BytecodeRecorderImpl implements RecorderContext {
                         return null;
                     }
                     ProxyInstance instance = getProxyInstance(returnType);
-                    if (instance == null)
+                    if (instance == null) {
                         return null;
+                    }
 
                     storedMethodCall.returnedProxy = instance.proxy;
                     storedMethodCall.proxyId = instance.key;
@@ -318,7 +330,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
     }
 
     public void writeBytecode(ClassOutput classOutput) {
-        ClassCreator file = ClassCreator.builder().classOutput(ClassOutput.gizmoAdaptor(classOutput, true))
+        ClassCreator file = ClassCreator.builder().classOutput(classOutput)
                 .className(className)
                 .superClass(Object.class).interfaces(StartupTask.class).build();
         MethodCreator mainMethod = file.getMethodCreator("deploy", void.class, StartupContext.class);
@@ -351,7 +363,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
             if (set instanceof StoredMethodCall) {
                 StoredMethodCall call = (StoredMethodCall) set;
                 if (!classInstanceVariables.containsKey(call.theClass)) {
-                    //this is a new recorder, create a deffered value that will allocate an array position for
+                    //this is a new recorder, create a deferred value that will allocate an array position for
                     //the recorder
                     DeferredArrayStoreParameter value = new DeferredArrayStoreParameter() {
                         @Override
@@ -375,7 +387,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
 
         loadComplete = true;
         //now we know know many items we have, create the array
-        ResultHandle array = mainMethod.newArray(Object.class, mainMethod.load(deferredParameterCount));
+        ResultHandle array = mainMethod.newArray(Object.class, deferredParameterCount);
 
         //this context manages the creation of new methods
         //it tracks the number of instruction groups and when they hit a threshold it
@@ -405,7 +417,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
                         ResultHandle[] params = new ResultHandle[call.parameters.length];
 
                         //now we actually load the arguments
-                        //this will retreive them from the array and create a ResultHandle
+                        //this will retrieve them from the array and create a ResultHandle
                         //(or possible re-use an existing ResultHandler if there is already one for the current method)
                         for (int i = 0; i < call.parameters.length; ++i) {
                             params[i] = context.loadDeferred(call.deferredParameters[i]);
@@ -417,8 +429,8 @@ public class BytecodeRecorderImpl implements RecorderContext {
 
                         if (call.method.getReturnType() != void.class) {
                             if (call.returnedProxy != null) {
-                                //if the invocation had a return valye put it in the startup context
-                                //to make it availible to other recorders (and also this recorder)
+                                //if the invocation had a return value put it in the startup context
+                                //to make it available to other recorders (and also this recorder)
                                 method.invokeVirtualMethod(
                                         ofMethod(StartupContext.class, "putValue", void.class, String.class, Object.class),
                                         method.getMethodParam(0), method.load(call.proxyId), callResult);
@@ -492,10 +504,10 @@ public class BytecodeRecorderImpl implements RecorderContext {
             return loadedObject;
         }
 
-        //create the appropriate DeferredParmater, a lot of these a fairly simple constant values,
+        //create the appropriate DeferredParameter, a lot of these a fairly simple constant values,
         //but some are quite complex when dealing with objects and collections
         if (substitutions.containsKey(param.getClass()) || substitutions.containsKey(expectedType)) {
-            //check for substitution types, if present we invoke recursivly on the substitution
+            //check for substitution types, if present we invoke recursively on the substitution
             SubstitutionHolder holder = substitutions.get(param.getClass());
             if (holder == null) {
                 holder = substitutions.get(expectedType);
@@ -793,7 +805,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
                 ResultHandle createValue(MethodContext context, MethodCreator method, ResultHandle array) {
                     //TODO large arrays can still generate a fair bit of bytecode, and there appears to be a gizmo issue that prevents casting to an array
                     //fix this later
-                    ResultHandle out = method.newArray(expectedType.getComponentType(), method.load(length));
+                    ResultHandle out = method.newArray(expectedType.getComponentType(), length);
                     for (int i = 0; i < length; ++i) {
                         method.writeArrayValue(out, i, context.loadDeferred(components[i]));
                     }
@@ -804,41 +816,54 @@ public class BytecodeRecorderImpl implements RecorderContext {
             // new com.foo.MyAnnotation_Proxy_AnnotationLiteral("foo")
             AnnotationProxy annotationProxy = (AnnotationProxy) param;
             List<MethodInfo> constructorParams = annotationProxy.getAnnotationClass().methods().stream()
-                    .filter(m -> !m.name().equals("<clinit>") && !m.name().equals("<init>"))
-                    .collect(Collectors.toList());
+                    .filter(m -> !m.name().equals("<clinit>") && !m.name().equals("<init>")).collect(Collectors.toList());
             Map<String, AnnotationValue> annotationValues = annotationProxy.getAnnotationInstance().values().stream()
                     .collect(Collectors.toMap(AnnotationValue::name, Function.identity()));
             DeferredParameter[] constructorParamsHandles = new DeferredParameter[constructorParams.size()];
 
             for (ListIterator<MethodInfo> iterator = constructorParams.listIterator(); iterator.hasNext();) {
                 MethodInfo valueMethod = iterator.next();
-                AnnotationValue value = annotationValues.get(valueMethod.name());
-                if (value == null) {
-                    // method.invokeInterfaceMethod(MAP_PUT, valuesHandle, method.load(entry.getKey()), loadObjectInstance(method, entry.getValue(), returnValueResults, entry.getValue().getClass()));
-                    Object defaultValue = annotationProxy.getDefaultValues().get(valueMethod.name());
-                    if (defaultValue != null) {
-                        constructorParamsHandles[iterator.previousIndex()] = loadObjectInstance(defaultValue,
-                                existing, defaultValue.getClass());
-                        continue;
+                Object explicitValue = annotationProxy.getValues().get(valueMethod.name());
+                if (explicitValue != null) {
+                    constructorParamsHandles[iterator.previousIndex()] = loadObjectInstance(explicitValue, existing,
+                            explicitValue.getClass());
+                } else {
+                    AnnotationValue value = annotationValues.get(valueMethod.name());
+                    if (value == null) {
+                        // method.invokeInterfaceMethod(MAP_PUT, valuesHandle, method.load(entry.getKey()), loadObjectInstance(method, entry.getValue(),
+                        // returnValueResults, entry.getValue().getClass()));
+                        Object defaultValue = annotationProxy.getDefaultValues().get(valueMethod.name());
+                        if (defaultValue != null) {
+                            constructorParamsHandles[iterator.previousIndex()] = loadObjectInstance(defaultValue, existing,
+                                    defaultValue.getClass());
+                            continue;
+                        }
+                        if (value == null) {
+                            value = valueMethod.defaultValue();
+                        }
                     }
                     if (value == null) {
-                        value = valueMethod.defaultValue();
+                        throw new NullPointerException("Value not set for " + param);
                     }
+                    DeferredParameter retValue = loadValue(value, annotationProxy.getAnnotationClass(), valueMethod);
+                    constructorParamsHandles[iterator.previousIndex()] = retValue;
                 }
-                if (value == null) {
-                    throw new NullPointerException("Value not set for " + param);
-                }
-                DeferredParameter retValue = loadValue(value, annotationProxy.getAnnotationClass(), valueMethod);
-                constructorParamsHandles[iterator.previousIndex()] = retValue;
             }
             return new DeferredArrayStoreParameter() {
                 @Override
                 ResultHandle createValue(MethodContext context, MethodCreator method, ResultHandle array) {
-                    return method
-                            .newInstance(MethodDescriptor.ofConstructor(annotationProxy.getAnnotationLiteralType(),
-                                    constructorParams.stream().map(m -> m.returnType().name().toString()).toArray()),
-                                    Arrays.stream(constructorParamsHandles).map(m -> context.loadDeferred(m))
-                                            .toArray(ResultHandle[]::new));
+                    MethodDescriptor constructor = MethodDescriptor.ofConstructor(annotationProxy.getAnnotationLiteralType(),
+                            constructorParams.stream().map(m -> m.returnType().name().toString()).toArray());
+                    ResultHandle[] args = new ResultHandle[constructorParamsHandles.length];
+                    for (int i = 0; i < constructorParamsHandles.length; i++) {
+                        DeferredParameter deferredParameter = constructorParamsHandles[i];
+                        if (deferredParameter instanceof DeferredArrayStoreParameter) {
+                            DeferredArrayStoreParameter arrayParam = (DeferredArrayStoreParameter) deferredParameter;
+                            arrayParam.doPrepare(context);
+                        }
+                        args[i] = context.loadDeferred(deferredParameter);
+                    }
+                    return method.newInstance(constructor, args);
                 }
             };
 
@@ -1042,7 +1067,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
                         handledProperties.add(i.getName());
 
                         Collection propertyValue = (Collection) i.read(param);
-                        if (!propertyValue.isEmpty()) {
+                        if (propertyValue != null && !propertyValue.isEmpty()) {
 
                             List<DeferredParameter> params = new ArrayList<>();
                             for (Object c : propertyValue) {
@@ -1081,7 +1106,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
 
                         handledProperties.add(i.getName());
                         Map<Object, Object> propertyValue = (Map<Object, Object>) i.read(param);
-                        if (!propertyValue.isEmpty()) {
+                        if (propertyValue != null && !propertyValue.isEmpty()) {
                             Map<DeferredParameter, DeferredParameter> def = new LinkedHashMap<>();
                             for (Map.Entry<Object, Object> entry : propertyValue.entrySet()) {
                                 DeferredParameter key = loadObjectInstance(entry.getKey(), existing,
@@ -1584,7 +1609,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
      * class responsible for splitting the bytecode into smaller methods, to make sure that even large objects and large
      * numbers of invocations do not put us over the method limit.
      */
-    class SplitMethodContext implements Closeable, MethodContext {
+    static class SplitMethodContext implements Closeable, MethodContext {
         final ResultHandle deferredParameterArray;
         final MethodCreator mainMethod;
         final ClassCreator classCreator;
@@ -1637,7 +1662,7 @@ public class BytecodeRecorderImpl implements RecorderContext {
         }
     }
 
-    final class FixedMethodContext implements MethodContext {
+    static final class FixedMethodContext implements MethodContext {
         final SplitMethodContext parent;
         final MethodCreator currentMethod;
         final Map<Integer, ResultHandle> currentMethodCache;

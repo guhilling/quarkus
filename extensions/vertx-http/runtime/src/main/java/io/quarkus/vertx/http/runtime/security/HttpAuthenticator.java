@@ -2,7 +2,6 @@ package io.quarkus.vertx.http.runtime.security;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -25,14 +24,14 @@ public class HttpAuthenticator {
     @Inject
     IdentityProviderManager identityProviderManager;
 
-    final HTTPAuthenticationMechanism mechanism;
+    final HttpAuthenticationMechanism mechanism;
 
     public HttpAuthenticator() {
         mechanism = null;
     }
 
     @Inject
-    public HttpAuthenticator(Instance<HTTPAuthenticationMechanism> instance,
+    public HttpAuthenticator(Instance<HttpAuthenticationMechanism> instance,
             Instance<IdentityProvider<UsernamePasswordAuthenticationRequest>> usernamePassword) {
         if (instance.isResolvable()) {
             if (instance.isAmbiguous()) {
@@ -45,13 +44,13 @@ public class HttpAuthenticator {
                 //TODO: config
                 mechanism = new BasicAuthenticationMechanism("Quarkus");
             } else {
-                mechanism = null;
+                mechanism = new NoAuthenticationMechanism();
             }
         }
     }
 
-    public HttpAuthenticator(HTTPAuthenticationMechanism mechanism) {
-        this.mechanism = mechanism;
+    public HttpAuthenticator(HttpAuthenticationMechanism mechanism) {
+        this.mechanism = mechanism == null ? new NoAuthenticationMechanism() : mechanism;
     }
 
     /**
@@ -64,16 +63,7 @@ public class HttpAuthenticator {
      * If no credentials are present it will resolve to null.
      */
     public CompletionStage<SecurityIdentity> attemptAuthentication(RoutingContext routingContext) {
-        if (mechanism == null) {
-            return CompletableFuture.completedFuture(null);
-        }
-        return mechanism.authenticate(routingContext, identityProviderManager)
-                .thenApply(new Function<SecurityIdentity, SecurityIdentity>() {
-                    @Override
-                    public SecurityIdentity apply(SecurityIdentity identity) {
-                        return identity;
-                    }
-                });
+        return mechanism.authenticate(routingContext, identityProviderManager);
     }
 
     /**
@@ -82,12 +72,40 @@ public class HttpAuthenticator {
      * @return
      */
     public CompletionStage<Void> sendChallenge(RoutingContext routingContext, Runnable closeTask) {
-        if (mechanism == null) {
-            routingContext.response().setStatusCode(HttpResponseStatus.FORBIDDEN.code());
-            closeTask.run();
-            return CompletableFuture.completedFuture(null);
+        if (closeTask == null) {
+            closeTask = NoopCloseTask.INSTANCE;
         }
         return mechanism.sendChallenge(routingContext).thenRun(closeTask);
+    }
+
+    public CompletionStage<ChallengeData> getChallenge(RoutingContext context) {
+        return mechanism.getChallenge(context);
+    }
+
+    static class NoAuthenticationMechanism implements HttpAuthenticationMechanism {
+
+        @Override
+        public CompletionStage<SecurityIdentity> authenticate(RoutingContext context,
+                IdentityProviderManager identityProviderManager) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<ChallengeData> getChallenge(RoutingContext context) {
+            ChallengeData challengeData = new ChallengeData(HttpResponseStatus.FORBIDDEN.code(), null, null);
+            return CompletableFuture.completedFuture(challengeData);
+        }
+
+    }
+
+    static class NoopCloseTask implements Runnable {
+
+        static final NoopCloseTask INSTANCE = new NoopCloseTask();
+
+        @Override
+        public void run() {
+
+        }
     }
 
 }

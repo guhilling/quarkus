@@ -1,10 +1,13 @@
 package io.quarkus.it.artemis;
 
+import javax.ws.rs.core.Response.Status;
+
 import org.apache.activemq.artemis.api.core.client.ClientMessage;
 import org.apache.activemq.artemis.api.core.client.ClientSession;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import io.quarkus.artemis.test.ArtemisTestResource;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
@@ -24,7 +27,7 @@ public class ArtemisConsumerTest implements ArtemisHelper {
         }
 
         Response response = RestAssured.with().body(body).get("/artemis");
-        Assertions.assertEquals(javax.ws.rs.core.Response.Status.OK.getStatusCode(), response.statusCode());
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.statusCode());
         Assertions.assertEquals(body, response.getBody().asString());
     }
 }

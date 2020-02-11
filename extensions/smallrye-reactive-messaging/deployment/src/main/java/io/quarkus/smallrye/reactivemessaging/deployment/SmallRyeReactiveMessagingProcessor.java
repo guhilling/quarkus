@@ -12,7 +12,7 @@ import java.util.Optional;
 import javax.enterprise.context.Dependent;
 import javax.enterprise.inject.spi.DeploymentException;
 
-import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.reactive.messaging.spi.Connector;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
@@ -38,12 +38,13 @@ import io.quarkus.arc.processor.BuildExtension;
 import io.quarkus.arc.processor.BuiltinScope;
 import io.quarkus.arc.processor.DotNames;
 import io.quarkus.arc.processor.InjectionPointInfo;
+import io.quarkus.deployment.GeneratedClassGizmoAdaptor;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.recording.RecorderContext;
 import io.quarkus.deployment.util.HashUtil;
 import io.quarkus.gizmo.ClassCreator;
@@ -117,27 +118,25 @@ public class SmallRyeReactiveMessagingProcessor {
         AnnotationStore annotationStore = validationPhase.getContext().get(BuildExtension.Key.ANNOTATION_STORE);
 
         // We need to collect all business methods annotated with @Incoming/@Outgoing first
-        for (BeanInfo bean : validationPhase.getContext().get(BuildExtension.Key.BEANS)) {
-            if (bean.isClassBean()) {
-                // TODO: add support for inherited business methods
-                for (MethodInfo method : bean.getTarget().get().asClass().methods()) {
-                    AnnotationInstance incoming = annotationStore.getAnnotation(method,
-                            io.quarkus.smallrye.reactivemessaging.deployment.DotNames.INCOMING);
-                    AnnotationInstance outgoing = annotationStore.getAnnotation(method,
-                            io.quarkus.smallrye.reactivemessaging.deployment.DotNames.OUTGOING);
-                    if (incoming != null || outgoing != null) {
-                        if (incoming != null && incoming.value().asString().isEmpty()) {
-                            validationPhase.getContext().addDeploymentProblem(
-                                    new DeploymentException("Empty @Incoming annotation on method " + method));
-                        }
-                        if (outgoing != null && outgoing.value().asString().isEmpty()) {
-                            validationPhase.getContext().addDeploymentProblem(
-                                    new DeploymentException("Empty @Outgoing annotation on method " + method));
-                        }
-                        // TODO: validate method params and return type?
-                        mediatorMethods.produce(new MediatorBuildItem(bean, method));
-                        LOGGER.debugf("Found mediator business method %s declared on %s", method, bean);
+        for (BeanInfo bean : validationPhase.getContext().beans().classBeans()) {
+            // TODO: add support for inherited business methods
+            for (MethodInfo method : bean.getTarget().get().asClass().methods()) {
+                AnnotationInstance incoming = annotationStore.getAnnotation(method,
+                        io.quarkus.smallrye.reactivemessaging.deployment.DotNames.INCOMING);
+                AnnotationInstance outgoing = annotationStore.getAnnotation(method,
+                        io.quarkus.smallrye.reactivemessaging.deployment.DotNames.OUTGOING);
+                if (incoming != null || outgoing != null) {
+                    if (incoming != null && incoming.value().asString().isEmpty()) {
+                        validationPhase.getContext().addDeploymentProblem(
+                                new DeploymentException("Empty @Incoming annotation on method " + method));
                     }
+                    if (outgoing != null && outgoing.value().asString().isEmpty()) {
+                        validationPhase.getContext().addDeploymentProblem(
+                                new DeploymentException("Empty @Outgoing annotation on method " + method));
+                    }
+                    // TODO: validate method params and return type?
+                    mediatorMethods.produce(new MediatorBuildItem(bean, method));
+                    LOGGER.debugf("Found mediator business method %s declared on %s", method, bean);
                 }
             }
         }
@@ -194,7 +193,7 @@ public class SmallRyeReactiveMessagingProcessor {
                         new BeanClassAnnotationExclusion(io.quarkus.smallrye.reactivemessaging.deployment.DotNames.OUTGOING)));
     }
 
-    @BuildStep
+    @BuildStep(loadsApplicationClasses = true)
     @Record(STATIC_INIT)
     public void build(SmallRyeReactiveMessagingRecorder recorder, RecorderContext recorderContext,
             BeanContainerBuildItem beanContainer,
@@ -205,12 +204,7 @@ public class SmallRyeReactiveMessagingProcessor {
 
         List<QuarkusMediatorConfiguration> configurations = new ArrayList<>(mediatorMethods.size());
 
-        ClassOutput classOutput = new ClassOutput() {
-            @Override
-            public void write(String name, byte[] data) {
-                generatedClass.produce(new GeneratedClassBuildItem(true, name, data));
-            }
-        };
+        ClassOutput classOutput = new GeneratedClassGizmoAdaptor(generatedClass, true);
 
         /*
          * Go through the collected MediatorMethods and build up the corresponding MediaConfiguration
@@ -230,7 +224,7 @@ public class SmallRyeReactiveMessagingProcessor {
 
             try {
                 QuarkusMediatorConfiguration mediatorConfiguration = QuarkusMediatorConfigurationUtil.create(methodInfo, bean,
-                        generatedInvokerName, recorderContext);
+                        generatedInvokerName, recorderContext, Thread.currentThread().getContextClassLoader());
                 configurations.add(mediatorConfiguration);
             } catch (IllegalArgumentException e) {
                 throw new DeploymentException(e); // needed to pass the TCK
@@ -240,7 +234,7 @@ public class SmallRyeReactiveMessagingProcessor {
         recorder.registerMediators(configurations, beanContainer.getValue());
 
         for (EmitterBuildItem it : emitterFields) {
-            int defaultBufferSize = ConfigProviderResolver.instance().getConfig()
+            int defaultBufferSize = ConfigProvider.getConfig()
                     .getOptionalValue("smallrye.messaging.emitter.default-buffer-size", Integer.class).orElse(127);
             if (it.getOverflow() != null) {
                 recorder.configureEmitter(beanContainer.getValue(), it.getName(), it.getOverflow(), it.getBufferSize(),

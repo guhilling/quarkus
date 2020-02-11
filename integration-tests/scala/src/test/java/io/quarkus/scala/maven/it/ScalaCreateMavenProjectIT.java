@@ -16,17 +16,17 @@ import org.junit.jupiter.api.Test;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 
-import io.quarkus.maven.CreateProjectMojo;
-import io.quarkus.maven.it.MojoTestBase;
+import io.quarkus.maven.it.QuarkusPlatformAwareMojoTestBase;
 import io.quarkus.maven.utilities.MojoUtils;
 
-public class ScalaCreateMavenProjectIT extends MojoTestBase {
+public class ScalaCreateMavenProjectIT extends QuarkusPlatformAwareMojoTestBase {
 
     private Invoker invoker;
     private File testDir;
 
     @Test
     public void testProjectGenerationFromScratchForScala() throws MavenInvocationException, IOException {
+
         testDir = initEmptyProject("projects/project-generation-scala");
         assertThat(testDir).isDirectory();
         invoker = initInvoker(testDir);
@@ -56,16 +56,17 @@ public class ScalaCreateMavenProjectIT extends MojoTestBase {
         Model model = loadPom(testDir);
         final DependencyManagement dependencyManagement = model.getDependencyManagement();
         final List<Dependency> dependencies = dependencyManagement.getDependencies();
-        assertThat(dependencies.stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                && d.getScope().equalsIgnoreCase("import")
-                && d.getType().equalsIgnoreCase("pom"))).isTrue();
+        assertThat(dependencies.stream()
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equals("import")
+                        && d.getType().equals("pom"))).isTrue();
 
         assertThat(
-                model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-resteasy")
+                model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equals("quarkus-resteasy")
                         && d.getVersion() == null)).isTrue();
         assertThat(
-                model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-scala")
+                model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equals("quarkus-scala")
                         && d.getVersion() == null)).isTrue();
 
         assertThat(model.getProfiles()).hasSize(1);
@@ -74,17 +75,26 @@ public class ScalaCreateMavenProjectIT extends MojoTestBase {
 
     private InvocationResult setup(Properties params)
             throws MavenInvocationException, FileNotFoundException, UnsupportedEncodingException {
+
+        try {
+            params.setProperty("platformGroupId", getBomGroupId());
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw e;
+        }
+        params.setProperty("platformArtifactId", getBomArtifactId());
+        params.setProperty("platformVersion", getPluginVersion());
+
         InvocationRequest request = new DefaultInvocationRequest();
         request.setBatchMode(true);
         request.setGoals(Collections.singletonList(
-                CreateProjectMojo.PLUGIN_KEY + ":" + MojoUtils.getPluginVersion() + ":create"));
+                getPluginGroupId() + ":" + getPluginArtifactId() + ":" + getPluginVersion() + ":create"));
         request.setProperties(params);
         getEnv().forEach(request::addShellEnvironment);
         File log = new File(testDir, "build-create-" + testDir.getName() + ".log");
-        PrintStreamLogger logger = new PrintStreamLogger(new PrintStream(new FileOutputStream(log), false, "UTF-8"),
-                InvokerLogger.DEBUG);
+        final PrintStreamLogger logger = new PrintStreamLogger(new PrintStream(new FileOutputStream(log), false, "UTF-8"),
+                InvokerLogger.INFO);
         invoker.setLogger(logger);
         return invoker.execute(request);
     }
-
 }

@@ -16,11 +16,10 @@ import org.junit.jupiter.api.Test;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 
-import io.quarkus.maven.CreateProjectMojo;
-import io.quarkus.maven.it.MojoTestBase;
+import io.quarkus.maven.it.QuarkusPlatformAwareMojoTestBase;
 import io.quarkus.maven.utilities.MojoUtils;
 
-public class KotlinCreateMavenProjectIT extends MojoTestBase {
+public class KotlinCreateMavenProjectIT extends QuarkusPlatformAwareMojoTestBase {
 
     private Invoker invoker;
     private File testDir;
@@ -56,10 +55,11 @@ public class KotlinCreateMavenProjectIT extends MojoTestBase {
         Model model = loadPom(testDir);
         final DependencyManagement dependencyManagement = model.getDependencyManagement();
         final List<Dependency> dependencies = dependencyManagement.getDependencies();
-        assertThat(dependencies.stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                && d.getScope().equalsIgnoreCase("import")
-                && d.getType().equalsIgnoreCase("pom"))).isTrue();
+        assertThat(dependencies.stream()
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equalsIgnoreCase("import")
+                        && d.getType().equalsIgnoreCase("pom"))).isTrue();
 
         assertThat(
                 model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-resteasy")
@@ -74,10 +74,14 @@ public class KotlinCreateMavenProjectIT extends MojoTestBase {
 
     private InvocationResult setup(Properties params)
             throws MavenInvocationException, FileNotFoundException, UnsupportedEncodingException {
+
+        params.setProperty("platformArtifactId", "quarkus-bom");
+        params.setProperty("platformVersion", getPluginVersion());
+
         InvocationRequest request = new DefaultInvocationRequest();
         request.setBatchMode(true);
         request.setGoals(Collections.singletonList(
-                CreateProjectMojo.PLUGIN_KEY + ":" + MojoUtils.getPluginVersion() + ":create"));
+                getPluginGroupId() + ":" + getPluginArtifactId() + ":" + getPluginVersion() + ":create"));
         request.setProperties(params);
         getEnv().forEach(request::addShellEnvironment);
         File log = new File(testDir, "build-create-" + testDir.getName() + ".log");

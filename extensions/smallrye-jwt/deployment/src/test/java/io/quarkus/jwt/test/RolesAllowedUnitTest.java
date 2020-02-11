@@ -17,7 +17,8 @@ import io.restassured.response.Response;
 
 public class RolesAllowedUnitTest {
     private static Class[] testClasses = {
-            RolesEndpoint.class
+            RolesEndpoint.class,
+            TokenUtils.class
     };
     /**
      * The test generated JWT token string
@@ -32,6 +33,10 @@ public class RolesAllowedUnitTest {
     static final QuarkusUnitTest config = new QuarkusUnitTest()
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
                     .addClasses(testClasses)
+                    .addAsResource("publicKey.pem")
+                    .addAsResource("privateKey.pem")
+                    .addAsResource("Token1.json")
+                    .addAsResource("Token2.json")
                     .addAsResource("application.properties"));
 
     @BeforeEach
@@ -99,8 +104,6 @@ public class RolesAllowedUnitTest {
                 .get("/endp/echo").andReturn();
 
         Assertions.assertEquals(HttpURLConnection.HTTP_UNAUTHORIZED, response.getStatusCode());
-        String replyString = response.body().asString();
-        Assertions.assertEquals("Not authorized", replyString);
     }
 
     /**
@@ -137,7 +140,7 @@ public class RolesAllowedUnitTest {
 
         Assertions.assertEquals(HttpURLConnection.HTTP_FORBIDDEN, response.getStatusCode());
         String replyString = response.body().asString();
-        Assertions.assertEquals("Access forbidden: role not allowed", replyString);
+        Assertions.assertEquals("Forbidden", replyString);
     }
 
     /**
@@ -213,7 +216,7 @@ public class RolesAllowedUnitTest {
 
         Assertions.assertEquals(HttpURLConnection.HTTP_FORBIDDEN, response.getStatusCode());
         String replyString = response.body().asString();
-        Assertions.assertEquals("Access forbidden: role not allowed", replyString);
+        Assertions.assertEquals("Forbidden", replyString);
     }
 
     /**

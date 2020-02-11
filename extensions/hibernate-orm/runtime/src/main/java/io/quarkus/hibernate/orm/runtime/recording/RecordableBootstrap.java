@@ -29,7 +29,6 @@ import org.hibernate.event.internal.EntityCopyObserverFactoryInitiator;
 import org.hibernate.hql.internal.QueryTranslatorFactoryInitiator;
 import org.hibernate.integrator.spi.Integrator;
 import org.hibernate.integrator.spi.IntegratorService;
-import org.hibernate.internal.util.config.ConfigurationHelper;
 import org.hibernate.persister.internal.PersisterClassResolverInitiator;
 import org.hibernate.persister.internal.PersisterFactoryInitiator;
 import org.hibernate.property.access.internal.PropertyAccessStrategyResolverInitiator;
@@ -68,11 +67,19 @@ public final class RecordableBootstrap extends StandardServiceRegistryBuilder {
     private final LoadedConfig aggregatedCfgXml;
 
     public RecordableBootstrap(BootstrapServiceRegistry bootstrapServiceRegistry) {
-        this(bootstrapServiceRegistry, LoadedConfig.baseline());
+        this(bootstrapServiceRegistry, initialProperties(), LoadedConfig.baseline());
     }
 
-    public RecordableBootstrap(BootstrapServiceRegistry bootstrapServiceRegistry, LoadedConfig loadedConfigBaseline) {
-        this.settings = QuarkusEnvironment.getInitialProperties();
+    private static Map initialProperties() {
+        HashMap map = new HashMap();
+        map.putAll(QuarkusEnvironment.getInitialProperties());
+        return map;
+    }
+
+    private RecordableBootstrap(BootstrapServiceRegistry bootstrapServiceRegistry, Map properties,
+            LoadedConfig loadedConfigBaseline) {
+        super(bootstrapServiceRegistry, properties, loadedConfigBaseline);
+        this.settings = properties;
         this.bootstrapServiceRegistry = bootstrapServiceRegistry;
         this.configLoader = new ConfigLoader(bootstrapServiceRegistry);
         this.aggregatedCfgXml = loadedConfigBaseline;
@@ -342,7 +349,6 @@ public final class RecordableBootstrap extends StandardServiceRegistryBuilder {
         final Map settingsCopy = new HashMap();
         settingsCopy.putAll(settings);
         settingsCopy.put(org.hibernate.boot.cfgxml.spi.CfgXmlAccessService.LOADED_CONFIG_KEY, aggregatedCfgXml);
-        ConfigurationHelper.resolvePlaceHolders(settingsCopy);
 
         return new StandardServiceRegistryImpl(autoCloseRegistry, bootstrapServiceRegistry, initiators,
                 providedServices, settingsCopy);

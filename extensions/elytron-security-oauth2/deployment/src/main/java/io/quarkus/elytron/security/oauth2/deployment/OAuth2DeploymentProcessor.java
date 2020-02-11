@@ -1,19 +1,20 @@
 package io.quarkus.elytron.security.oauth2.deployment;
 
-import java.util.function.Supplier;
-
 import javax.enterprise.context.ApplicationScoped;
 
 import org.wildfly.security.auth.server.SecurityRealm;
 
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
-import io.quarkus.arc.deployment.RuntimeBeanBuildItem;
+import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
+import io.quarkus.deployment.builditem.CapabilityBuildItem;
 import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.elytron.security.deployment.ElytronTokenMarkerBuildItem;
 import io.quarkus.elytron.security.deployment.SecurityRealmBuildItem;
 import io.quarkus.elytron.security.oauth2.runtime.OAuth2Config;
 import io.quarkus.elytron.security.oauth2.runtime.OAuth2Recorder;
@@ -32,7 +33,12 @@ class OAuth2DeploymentProcessor {
 
     OAuth2Config oauth2;
 
-    @BuildStep(providesCapabilities = "io.quarkus.elytron.security.oauth2")
+    @BuildStep
+    CapabilityBuildItem capability() {
+        return new CapabilityBuildItem(Capabilities.SECURITY_ELYTRON_OAUTH2);
+    }
+
+    @BuildStep
     FeatureBuildItem feature() {
         return new FeatureBuildItem(FeatureBuildItem.SECURITY_OAUTH2);
     }
@@ -52,7 +58,7 @@ class OAuth2DeploymentProcessor {
      * @throws Exception - on any failure
      */
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
+    @Record(ExecutionTime.RUNTIME_INIT)
     AdditionalBeanBuildItem configureOauth2RealmAuthConfig(OAuth2Recorder recorder,
             BuildProducer<SecurityRealmBuildItem> securityRealm) throws Exception {
         if (oauth2.enabled) {
@@ -64,12 +70,20 @@ class OAuth2DeploymentProcessor {
     }
 
     @BuildStep
+    ElytronTokenMarkerBuildItem marker() {
+        if (oauth2.enabled) {
+            return new ElytronTokenMarkerBuildItem();
+        }
+        return null;
+    }
+
+    @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
-    RuntimeBeanBuildItem augmentor(OAuth2Recorder recorder) {
-        return RuntimeBeanBuildItem.builder(SecurityIdentityAugmentor.class)
-                .setScope(ApplicationScoped.class)
-                .setSupplier((Supplier) recorder.augmentor(oauth2))
-                .setRemovable(false)
-                .build();
+    SyntheticBeanBuildItem augmentor(OAuth2Recorder recorder) {
+        return SyntheticBeanBuildItem.configure(SecurityIdentityAugmentor.class)
+                .scope(ApplicationScoped.class)
+                .runtimeValue(recorder.augmentor(oauth2))
+                .unremovable()
+                .done();
     }
 }

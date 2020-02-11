@@ -19,12 +19,13 @@ public class SmallryeJwtDisabledTest {
     static final QuarkusUnitTest config = new QuarkusUnitTest()
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
                     .addClasses(testClasses)
+                    .addAsResource("publicKey.pem")
                     .addAsResource("smallryeJwtDisabled.properties", "application.properties"));
 
     @Test
     public void serviceIsNotSecured() throws Exception {
         io.restassured.response.Response response = RestAssured.given().get("/endp/echo").andReturn();
 
-        Assertions.assertEquals(HttpURLConnection.HTTP_UNAUTHORIZED, response.getStatusCode());
+        Assertions.assertEquals(HttpURLConnection.HTTP_FORBIDDEN, response.getStatusCode());
     }
 }

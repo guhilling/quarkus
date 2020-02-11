@@ -10,6 +10,8 @@ import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import io.quarkus.gizmo.ClassCreator;
 import io.quarkus.gizmo.FieldDescriptor;
@@ -18,7 +20,6 @@ import io.quarkus.gizmo.MethodDescriptor;
 import io.quarkus.gizmo.ResultHandle;
 import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import io.quarkus.hibernate.orm.panache.runtime.JpaOperations;
-import io.quarkus.panache.common.Sort;
 import io.quarkus.spring.data.deployment.DotNames;
 import io.quarkus.spring.data.deployment.MethodNameParser;
 import io.quarkus.spring.data.runtime.TypesConverter;
@@ -82,8 +83,7 @@ public class DerivedMethodsAdder extends AbstractMethodsAdder {
 
             try (MethodCreator methodCreator = classCreator.getMethodCreator(method.name(), returnType.name().toString(),
                     parameterTypesStr)) {
-                ResultHandle paramsArray = methodCreator.newArray(Object.class,
-                        methodCreator.load(parseResult.getParamCount()));
+                ResultHandle paramsArray = methodCreator.newArray(Object.class, parseResult.getParamCount());
                 for (int i = 0; i < queryParameterIndexes.size(); i++) {
                     methodCreator.writeArrayValue(paramsArray, methodCreator.load(i),
                             methodCreator.getMethodParam(queryParameterIndexes.get(i)));
@@ -107,6 +107,16 @@ public class DerivedMethodsAdder extends AbstractMethodsAdder {
                                 methodCreator.getMethodParam(sortParameterIndex));
                     } else if (parseResult.getSort() != null) {
                         finalQuery += JpaOperations.toOrderBy(parseResult.getSort());
+                    } else if (pageableParameterIndex != null) {
+                        ResultHandle pageable = methodCreator.getMethodParam(pageableParameterIndex);
+                        ResultHandle pageableSort = methodCreator.invokeInterfaceMethod(
+                                MethodDescriptor.ofMethod(Pageable.class, "getSort", Sort.class),
+                                pageable);
+                        sort = methodCreator.invokeStaticMethod(
+                                MethodDescriptor.ofMethod(TypesConverter.class, "toPanacheSort",
+                                        io.quarkus.panache.common.Sort.class,
+                                        org.springframework.data.domain.Sort.class),
+                                pageableSort);
                     }
 
                     // call JpaOperations.find()
@@ -117,7 +127,7 @@ public class DerivedMethodsAdder extends AbstractMethodsAdder {
                             methodCreator.load(finalQuery), sort, paramsArray);
 
                     generateFindQueryResultHandling(methodCreator, panacheQuery, pageableParameterIndex, repositoryClassInfo,
-                            entityClassInfo, returnType.name(), parseResult.getTopCount(), method.name());
+                            entityClassInfo, returnType.name(), parseResult.getTopCount(), method.name(), null);
 
                 } else if (parseResult.getQueryType() == MethodNameParser.QueryType.COUNT) {
                     if (!DotNames.PRIMITIVE_LONG.equals(returnType.name()) && !DotNames.LONG.equals(returnType.name())) {

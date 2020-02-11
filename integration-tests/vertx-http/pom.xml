@@ -43,7 +43,7 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>${project.groupId}</groupId>
+                <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-maven-plugin</artifactId>
                 <version>${project.version}</version>
                 <executions>
@@ -85,7 +85,7 @@
                         </executions>
                     </plugin>
                     <plugin>
-                        <groupId>${project.groupId}</groupId>
+                        <groupId>io.quarkus</groupId>
                         <artifactId>quarkus-maven-plugin</artifactId>
                         <version>${project.version}</version>
                         <executions>
@@ -97,7 +97,13 @@
                                 <configuration>
                                     <cleanupServer>true</cleanupServer>
                                     <enableHttpUrlHandler>true</enableHttpUrlHandler>
+                                    <!-- Include the server certificate -->
+                                    <additionalBuildArgs>
+                                        <additionalBuildArg>-H:IncludeResources=.*\.jks</additionalBuildArg>
+                                        <additionalBuildArg>-H:EnableURLProtocols=http,https</additionalBuildArg>
+                                    </additionalBuildArgs>
                                     <graalvmHome>${graalvmHome}</graalvmHome>
+                                    <enableAllSecurityServices>true</enableAllSecurityServices>
                                 </configuration>
                             </execution>
                         </executions>

@@ -20,11 +20,9 @@ public class RestAssuredURLManager {
     private static final Field portField;
     private static final Field baseURIField;
     private static final Field basePathField;
-    private int oldPort;
-    private String oldBaseURI;
-    private String oldBasePath;
-
-    private final boolean useSecureConnection;
+    private static int oldPort;
+    private static String oldBaseURI;
+    private static String oldBasePath;
 
     static {
         Field p;
@@ -48,15 +46,15 @@ public class RestAssuredURLManager {
         basePathField = basePath;
     }
 
-    public RestAssuredURLManager(boolean useSecureConnection) {
-        this.useSecureConnection = useSecureConnection;
+    private RestAssuredURLManager() {
+
     }
 
     private static int getPortFromConfig(String key, int defaultValue) {
         return ConfigProvider.getConfig().getOptionalValue(key, Integer.class).orElse(defaultValue);
     }
 
-    public void setURL() {
+    public static void setURL(boolean useSecureConnection) {
         if (portField != null) {
             try {
                 oldPort = (Integer) portField.get(null);
@@ -81,7 +79,7 @@ public class RestAssuredURLManager {
         if (basePathField != null) {
             try {
                 oldBasePath = (String) basePathField.get(null);
-                Optional<String> basePath = ConfigProvider.getConfig().getOptionalValue("quarkus.servlet.context-path",
+                Optional<String> basePath = ConfigProvider.getConfig().getOptionalValue("quarkus.http.root-path",
                         String.class);
                 if (basePath.isPresent()) {
                     basePathField.set(null, basePath.get());
@@ -92,7 +90,7 @@ public class RestAssuredURLManager {
         }
     }
 
-    public void clearURL() {
+    public static void clearURL() {
         if (portField != null) {
             try {
                 portField.set(null, oldPort);

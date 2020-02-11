@@ -4,6 +4,7 @@ import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import javax.websocket.ClientEndpoint;
@@ -29,8 +30,8 @@ import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.ExecutorBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.ServiceStartBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.ServiceProviderBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
 import io.quarkus.runtime.annotations.ConfigRoot;
 import io.quarkus.undertow.deployment.ServletContextAttributeBuildItem;
 import io.quarkus.undertow.websockets.runtime.UndertowWebsocketRecorder;
@@ -174,11 +175,11 @@ public class UndertowWebsocketProcessor {
         /**
          * The security key for remote hot deployment
          */
-        String password;
+        Optional<String> password;
 
         /**
          * The remote URL to connect to
          */
-        String url;
+        Optional<String> url;
     }
 }

@@ -17,7 +17,6 @@ final public class Constants {
     public static final char DOT = '.';
     public static final String EMPTY = "";
     public static final String DASH = "-";
-    public static final String CORE = "core-";
     public static final String ADOC_EXTENSION = ".adoc";
     public static final String DIGIT_OR_LOWERCASE = "^[a-z0-9]+$";
 
@@ -30,18 +29,21 @@ final public class Constants {
     public static final String DEPLOYMENT = "deployment";
 
     public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^.+[\\.$](\\w+)$");
-    public static final Pattern CONFIG_ROOT_PATTERN = Pattern.compile("^(\\w+)Config(uration)?");
     public static final Pattern PKG_PATTERN = Pattern.compile("^io\\.quarkus\\.(\\w+)\\.?(\\w+)?\\.?(\\w+)?");
 
-    public static final String MEMORY_SIZE_TYPE = "io.quarkus.runtime.configuration.MemorySize";
-    public static final String ANNOTATION_BUILD_STEP = "io.quarkus.deployment.annotations.BuildStep";
-    public static final String ANNOTATION_CONFIG_GROUP = "io.quarkus.runtime.annotations.ConfigGroup";
-    public static final String ANNOTATION_CONFIG_ITEM = "io.quarkus.runtime.annotations.ConfigItem";
-    public static final String ANNOTATION_CONFIG_ROOT = "io.quarkus.runtime.annotations.ConfigRoot";
-    public static final String ANNOTATION_TEMPLATE = "io.quarkus.runtime.annotations.Template";
-    public static final String ANNOTATION_RECORDER = "io.quarkus.runtime.annotations.Recorder";
     public static final String INSTANCE_SYM = "__instance";
     public static final String QUARKUS = "quarkus";
+
+    public static final String ANNOTATION_TEMPLATE = "io.quarkus.runtime.annotations.Template";
+    public static final String ANNOTATION_RECORDER = "io.quarkus.runtime.annotations.Recorder";
+
+    public static final String MEMORY_SIZE_TYPE = "io.quarkus.runtime.configuration.MemorySize";
+    public static final String ANNOTATION_CONFIG_ITEM = "io.quarkus.runtime.annotations.ConfigItem";
+    public static final String ANNOTATION_BUILD_STEP = "io.quarkus.deployment.annotations.BuildStep";
+    public static final String ANNOTATION_CONFIG_ROOT = "io.quarkus.runtime.annotations.ConfigRoot";
+    public static final String ANNOTATION_CONFIG_GROUP = "io.quarkus.runtime.annotations.ConfigGroup";
+    public static final String ANNOTATION_CONFIG_DOC_MAP_KEY = "io.quarkus.runtime.annotations.ConfigDocMapKey";
+    public static final String ANNOTATION_CONFIG_DOC_SECTION = "io.quarkus.runtime.annotations.ConfigDocSection";
 
     public static final Set<String> SUPPORTED_ANNOTATIONS_TYPES = new HashSet<>();
     public static final Map<String, String> ALIASED_TYPES = new HashMap<>();
@@ -50,8 +52,18 @@ final public class Constants {
             .get(System.getProperties().getProperty("maven.multiModuleProjectDirectory")
                     + Constants.DOCS_SRC_MAIN_ASCIIDOC_GENERATED);
     public static final File GENERATED_DOCS_DIR = GENERATED_DOCS_PATH.toFile();
+
+    /**
+     * Holds the list of configuration items / configuration sections of each configuration roots.
+     */
     public static final File ALL_CR_GENERATED_DOC = GENERATED_DOCS_PATH
             .resolve("all-configuration-roots-generated-doc.properties").toFile();
+
+    /**
+     * Holds the list of computed file names and the list of configuration roots of this extension
+     */
+    public static final File EXTENSION_CONFIGURATION_ROOT_LIST = GENERATED_DOCS_PATH
+            .resolve("extensions-configuration-roots-list.properties").toFile();
 
     public static final String DURATION_NOTE_ANCHOR = "duration-note-anchor";
     public static final String MEMORY_SIZE_NOTE_ANCHOR = "memory-size-note-anchor";
@@ -62,9 +74,10 @@ final public class Constants {
             Constants.MEMORY_SIZE_NOTE_ANCHOR, "MemorySize");
 
     public static final String CONFIG_PHASE_RUNTIME_ILLUSTRATION = "icon:cogs[title=Overridable at runtime]";
+    public static final String CONFIG_PHASE_BOOTSTRAP_ILLUSTRATION = "icon:cogs[title=Bootstrap - Overridable at runtime]";
     public static final String CONFIG_PHASE_BUILD_TIME_ILLUSTRATION = "icon:archive[title=Fixed at build time]";
     public static final String CONFIG_PHASE_LEGEND = String.format(
-            "\n%s Configuration property fixed at build time - %s️ Configuration property overridable at runtime \n",
+            "%n%s Configuration property fixed at build time - %s️ Configuration property overridable at runtime %n",
             CONFIG_PHASE_BUILD_TIME_ILLUSTRATION, CONFIG_PHASE_RUNTIME_ILLUSTRATION);
 
     public static final String DURATION_FORMAT_NOTE = "\n[NOTE]" +
@@ -77,7 +90,7 @@ final public class Constants {
             "\n" +
             "You can also provide duration values starting with a number.\n" +
             "In this case, if the value consists only of a number, the converter treats the value as seconds.\n" +
-            "Otherwise, `PT` is implicitly appended to the value to obtain a standard `java.time.Duration` format.\n" +
+            "Otherwise, `PT` is implicitly prepended to the value to obtain a standard `java.time.Duration` format.\n" +
             "====\n";
 
     public static final String MEMORY_SIZE_FORMAT_NOTE = "\n[NOTE]" +
@@ -94,6 +107,7 @@ final public class Constants {
         ALIASED_TYPES.put(OptionalInt.class.getName(), Integer.class.getName());
         ALIASED_TYPES.put(OptionalDouble.class.getName(), Double.class.getName());
         ALIASED_TYPES.put("java.lang.Class<?>", "class name");
+        ALIASED_TYPES.put("java.net.InetSocketAddress", "host:port");
         ALIASED_TYPES.put(Path.class.getName(), "path");
         ALIASED_TYPES.put(String.class.getName(), "string");
         SUPPORTED_ANNOTATIONS_TYPES.add(ANNOTATION_BUILD_STEP);

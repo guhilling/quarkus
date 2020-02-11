@@ -12,10 +12,11 @@
 
     <artifactId>quarkus-undertow-websockets</artifactId>
     <name>Quarkus - Undertow - WebSockets - Runtime</name>
+    <description>WebSocket support</description>
 
     <dependencies>
         <dependency>
-            <groupId>com.oracle.substratevm</groupId>
+            <groupId>org.graalvm.nativeimage</groupId>
             <artifactId>svm</artifactId>
         </dependency>
         <dependency>
@@ -29,6 +30,18 @@
         <dependency>
             <groupId>io.quarkus.http</groupId>
             <artifactId>quarkus-http-websockets-jsr</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jboss.spec.javax.websocket</groupId>
+                    <artifactId>
+                        jboss-websocket-api_1.1_spec
+                    </artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.websocket</groupId>
+            <artifactId>jakarta.websocket-api</artifactId>
         </dependency>
     </dependencies>
 
@@ -37,6 +50,13 @@
             <plugin>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bootstrap-maven-plugin</artifactId>
+                <configuration>
+                    <excludedArtifacts>
+                        <excludedArtifact>org.jboss.spec.javax.websocket:jboss-websocket-api_1.0_spec</excludedArtifact>
+                        <excludedArtifact>org.jboss.spec.javax.websocket:jboss-websocket-api_1.1_spec</excludedArtifact>
+                        <excludedArtifact>javax.websocket:javax.websocket-api</excludedArtifact>
+                    </excludedArtifacts>
+                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>

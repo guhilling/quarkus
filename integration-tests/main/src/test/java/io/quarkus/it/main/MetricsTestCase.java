@@ -160,6 +160,23 @@ public class MetricsTestCase {
                 .body(not(containsString("io_smallrye_metrics")));
     }
 
+    /**
+     * This is to verify that a Gauge works in native mode when its owning bean is annotated with RegisterForReflection.
+     */
+    @Test
+    public void testDummyGauge() {
+        assertMetricExactValue(metricsPrefix + "DummyGauge_dummyGauge", "42.0");
+    }
+
+    /**
+     * This is to verify that a Gauge works in native mode even if its owning bean is not
+     * explicitly annotated with RegisterForReflection.
+     */
+    @Test
+    public void testDummyGaugeNoReflectionAnnotation() {
+        assertMetricExactValue(metricsPrefix + "DummyGaugeNoReflectionAnnotation_dummyGauge", "1234.0");
+    }
+
     private void assertMetricExactValue(String name, String val) {
         RestAssured.when().get("/metrics").then()
                 .body(containsString(name + " " + val));

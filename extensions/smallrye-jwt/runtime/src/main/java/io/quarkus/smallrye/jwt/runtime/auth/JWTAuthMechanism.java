@@ -19,7 +19,8 @@ import io.quarkus.security.credential.TokenCredential;
 import io.quarkus.security.identity.IdentityProviderManager;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.identity.request.TokenAuthenticationRequest;
-import io.quarkus.vertx.http.runtime.security.HTTPAuthenticationMechanism;
+import io.quarkus.vertx.http.runtime.security.ChallengeData;
+import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism;
 import io.smallrye.jwt.auth.AbstractBearerTokenExtractor;
 import io.smallrye.jwt.auth.cdi.PrincipalProducer;
 import io.smallrye.jwt.auth.principal.JWTAuthContextInfo;
@@ -30,7 +31,7 @@ import io.vertx.ext.web.RoutingContext;
  * An AuthenticationMechanism that validates a caller based on a MicroProfile JWT bearer token
  */
 @ApplicationScoped
-public class JWTAuthMechanism implements HTTPAuthenticationMechanism {
+public class JWTAuthMechanism implements HttpAuthenticationMechanism {
 
     @Inject
     private JWTAuthContextInfo authContextInfo;
@@ -52,10 +53,12 @@ public class JWTAuthMechanism implements HTTPAuthenticationMechanism {
     }
 
     @Override
-    public CompletionStage<Boolean> sendChallenge(RoutingContext context) {
-        context.response().headers().set(HttpHeaderNames.WWW_AUTHENTICATE, "Bearer {token}");
-        context.response().setStatusCode(HttpResponseStatus.UNAUTHORIZED.code());
-        return CompletableFuture.completedFuture(true);
+    public CompletionStage<ChallengeData> getChallenge(RoutingContext context) {
+        ChallengeData result = new ChallengeData(
+                HttpResponseStatus.UNAUTHORIZED.code(),
+                HttpHeaderNames.WWW_AUTHENTICATE,
+                "Bearer {token}");
+        return CompletableFuture.completedFuture(result);
     }
 
     private static class VertxBearerTokenExtractor extends AbstractBearerTokenExtractor {

@@ -12,7 +12,7 @@
 
     <artifactId>quarkus-smallrye-reactive-messaging-amqp</artifactId>
     <name>Quarkus - SmallRye Reactive Messaging - AMQP 1.0 - Runtime</name>
-
+    <description>AMQP reactive messaging connector</description>
     <dependencies>
         <dependency>
             <groupId>io.smallrye.reactive</groupId>
@@ -42,11 +42,19 @@
                     <groupId>com.fasterxml.jackson.core</groupId>
                     <artifactId>jackson-core</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>javax.annotation</groupId>
+                    <artifactId>javax.annotation-api</artifactId>
+                </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
         </dependency>
 
         <dependency>
-            <groupId>com.oracle.substratevm</groupId>
+            <groupId>org.graalvm.nativeimage</groupId>
             <artifactId>svm</artifactId>
         </dependency>
     </dependencies>

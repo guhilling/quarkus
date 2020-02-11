@@ -13,9 +13,11 @@ import javax.net.ssl.TrustManagerFactory;
 
 import com.oracle.svm.core.annotate.Alias;
 import com.oracle.svm.core.annotate.Delete;
+import com.oracle.svm.core.annotate.RecomputeFieldValue;
 import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
 import com.oracle.svm.core.jdk.JDK11OrLater;
+import com.oracle.svm.core.jdk.JDK8OrEarlier;
 
 import io.netty.bootstrap.AbstractBootstrapConfig;
 import io.netty.bootstrap.ChannelFactory;
@@ -91,11 +93,6 @@ final class Target_io_netty_handler_ssl_SslHandler$SslEngineType {
     }
 }
 
-@Delete
-@TargetClass(className = "io.netty.handler.ssl.ConscryptAlpnSslEngine")
-final class Target_io_netty_handler_ssl_ConscryptAlpnSslEngine {
-}
-
 @TargetClass(className = "io.netty.handler.ssl.JdkAlpnApplicationProtocolNegotiator$AlpnWrapper", onlyWith = JDK11OrLater.class)
 final class Target_io_netty_handler_ssl_JdkAlpnApplicationProtocolNegotiator_AlpnWrapper {
     @Substitute
@@ -104,6 +101,43 @@ final class Target_io_netty_handler_ssl_JdkAlpnApplicationProtocolNegotiator_Alp
         return (SSLEngine) (Object) new Target_io_netty_handler_ssl_Java9SslEngine(engine, applicationNegotiator, isServer);
     }
 
+}
+
+@TargetClass(className = "io.netty.handler.ssl.JdkAlpnApplicationProtocolNegotiator$AlpnWrapper", onlyWith = JDK8OrEarlier.class)
+final class Target_io_netty_handler_ssl_JdkAlpnApplicationProtocolNegotiator_AlpnWrapperJava8 {
+    @Substitute
+    public SSLEngine wrapSslEngine(SSLEngine engine, ByteBufAllocator alloc,
+            JdkApplicationProtocolNegotiator applicationNegotiator, boolean isServer) {
+        if (Target_io_netty_handler_ssl_JettyAlpnSslEngine.isAvailable()) {
+            return isServer
+                    ? (SSLEngine) (Object) Target_io_netty_handler_ssl_JettyAlpnSslEngine.newServerEngine(engine,
+                            applicationNegotiator)
+                    : (SSLEngine) (Object) Target_io_netty_handler_ssl_JettyAlpnSslEngine.newClientEngine(engine,
+                            applicationNegotiator);
+        }
+        throw new RuntimeException("Unable to wrap SSLEngine of type " + engine.getClass().getName());
+    }
+
+}
+
+@TargetClass(className = "io.netty.handler.ssl.JettyAlpnSslEngine", onlyWith = JDK8OrEarlier.class)
+final class Target_io_netty_handler_ssl_JettyAlpnSslEngine {
+    @Alias
+    static boolean isAvailable() {
+        return false;
+    }
+
+    @Alias
+    static Target_io_netty_handler_ssl_JettyAlpnSslEngine newClientEngine(SSLEngine engine,
+            JdkApplicationProtocolNegotiator applicationNegotiator) {
+        return null;
+    }
+
+    @Alias
+    static Target_io_netty_handler_ssl_JettyAlpnSslEngine newServerEngine(SSLEngine engine,
+            JdkApplicationProtocolNegotiator applicationNegotiator) {
+        return null;
+    }
 }
 
 @TargetClass(className = "io.netty.handler.ssl.Java9SslEngine", onlyWith = JDK11OrLater.class)
@@ -282,6 +316,77 @@ final class Target_io_netty_channel_nio_NioEventLoop {
     private static Queue<Runnable> newTaskQueue0(int maxPendingTasks) {
         return new LinkedBlockingDeque<>();
     }
+}
+
+@TargetClass(className = "io.netty.buffer.AbstractReferenceCountedByteBuf")
+final class Target_io_netty_buffer_AbstractReferenceCountedByteBuf {
+
+    @Alias
+    @RecomputeFieldValue(kind = RecomputeFieldValue.Kind.FieldOffset, name = "refCnt")
+    private static long REFCNT_FIELD_OFFSET;
+}
+
+@TargetClass(className = "io.netty.util.AbstractReferenceCounted")
+final class Target_io_netty_util_AbstractReferenceCounted {
+
+    @Alias
+    @RecomputeFieldValue(kind = RecomputeFieldValue.Kind.FieldOffset, name = "refCnt")
+    private static long REFCNT_FIELD_OFFSET;
+}
+
+// This class is runtime-initialized by NettyProcessor
+final class Holder_io_netty_util_concurrent_ScheduledFutureTask {
+    static final long START_TIME = System.nanoTime();
+}
+
+@TargetClass(className = "io.netty.util.concurrent.ScheduledFutureTask")
+final class Target_io_netty_util_concurrent_ScheduledFutureTask {
+    @Delete
+    public static long START_TIME = 0;
+
+    @Substitute
+    static long initialNanoTime() {
+        return Holder_io_netty_util_concurrent_ScheduledFutureTask.START_TIME;
+    }
+
+    @Substitute
+    static long nanoTime() {
+        return System.nanoTime() - Holder_io_netty_util_concurrent_ScheduledFutureTask.START_TIME;
+    }
+
+    @Alias
+    public long deadlineNanos() {
+        return 0;
+    }
+
+    @Substitute
+    public long delayNanos(long currentTimeNanos) {
+        return Math.max(0,
+                deadlineNanos() - (currentTimeNanos - Holder_io_netty_util_concurrent_ScheduledFutureTask.START_TIME));
+    }
+}
+
+@TargetClass(className = "io.netty.channel.ChannelHandlerMask")
+final class Target_io_netty_channel_ChannelHandlerMask {
+
+    // Netty tries to self-optimized itself, but it requires lots of reflection. We disable this behavior and avoid
+    // misleading DEBUG messages in the log.
+    @Substitute
+    private static boolean isSkippable(final Class<?> handlerType, final String methodName, final Class... paramTypes) {
+        return false;
+    }
+}
+
+@TargetClass(className = "io.netty.util.internal.NativeLibraryLoader")
+final class Target_io_netty_util_internal_NativeLibraryLoader {
+
+    // This method can trick GraalVM into thinking that Classloader#defineClass is getting called
+    @Substitute
+    static Class<?> tryToLoadClass(final ClassLoader loader, final Class<?> helper)
+            throws ClassNotFoundException {
+        return Class.forName(helper.getName(), false, loader);
+    }
+
 }
 
 class NettySubstitutions {

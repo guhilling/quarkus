@@ -12,11 +12,11 @@
 
     <artifactId>quarkus-integration-test-jpa-mssql</artifactId>
     <name>Quarkus - Integration Tests - JPA - MSSQL</name>
-    <description>Module that contains JPA related tests running in strict mode with the MSSQL database</description>
+    <description>Module that contains JPA related tests running with the MSSQL database</description>
 
     <properties>
-        <mssqldb.url>SomeJDBCUrl</mssqldb.url>
-        <mssqldb.sa-password>SomeJDBCPassword</mssqldb.sa-password>
+        <mssqldb.url>jdbc:sqlserver://localhost:1433;databaseName=tempdb</mssqldb.url>
+        <mssqldb.sa-password>ActuallyRequired11Complexity</mssqldb.sa-password>
     </properties>
 
     <dependencies>
@@ -138,6 +138,7 @@
                     <plugin>
                         <groupId>io.quarkus</groupId>
                         <artifactId>quarkus-maven-plugin</artifactId>
+                        <version>${project.version}</version>
                         <executions>
                             <execution>
                                 <id>native-image</id>
@@ -155,7 +156,6 @@
                                     <cleanupServer>true</cleanupServer>
                                     <enableHttpUrlHandler>true</enableHttpUrlHandler>
                                     <graalvmHome>${graalvmHome}</graalvmHome>
-                                    <enableJni>false</enableJni>
                                     <debugBuildProcess>false</debugBuildProcess>
                                 </configuration>
                             </execution>
@@ -188,6 +188,9 @@
                                     <name>microsoft/mssql-server-linux:2017-CU12</name>
                                     <alias>quarkus-test-mssqldb</alias>
                                     <run>
+                                        <network>
+                                            <mode>bridge</mode>
+                                        </network>
                                         <ports>
                                             <port>1433:1433</port>
                                         </ports>

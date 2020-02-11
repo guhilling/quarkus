@@ -1,8 +1,9 @@
 package io.quarkus.it.mongodb;
 
 import static io.restassured.RestAssured.get;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.is;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -14,29 +15,22 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import de.flapdoodle.embed.mongo.MongodExecutable;
-import de.flapdoodle.embed.mongo.MongodStarter;
-import de.flapdoodle.embed.mongo.config.IMongodConfig;
-import de.flapdoodle.embed.mongo.config.MongodConfigBuilder;
-import de.flapdoodle.embed.mongo.config.Net;
-import de.flapdoodle.embed.mongo.distribution.Version;
-import de.flapdoodle.embed.process.runtime.Network;
+import io.quarkus.it.mongodb.discriminator.Car;
+import io.quarkus.it.mongodb.discriminator.Moto;
+import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.common.mapper.TypeRef;
+import io.restassured.config.ObjectMapperConfig;
 import io.restassured.mapper.ObjectMapper;
 import io.restassured.mapper.ObjectMapperDeserializationContext;
 import io.restassured.mapper.ObjectMapperSerializationContext;
 import io.restassured.response.Response;
 
 @QuarkusTest
-class BookResourceTest {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(BookResourceTest.class);
-    private static MongodExecutable MONGO;
+@QuarkusTestResource(MongoTestResource.class)
+public class BookResourceTest {
 
     private static Jsonb jsonb;
 
@@ -54,32 +48,12 @@ class BookResourceTest {
                 return jsonb.toJson(context.getObjectToSerialize());
             }
         };
-        RestAssured.objectMapper(mapper);
+        RestAssured.config().objectMapperConfig(ObjectMapperConfig.objectMapperConfig().defaultObjectMapper(mapper));
     }
 
     @AfterAll
     public static void releaseMapper() throws Exception {
         jsonb.close();
-    }
-
-    @BeforeAll
-    public static void startMongoDatabase() throws IOException {
-        Version.Main version = Version.Main.V4_0;
-        int port = 27018;
-        LOGGER.info("Starting Mongo {} on port {}", version, port);
-        IMongodConfig config = new MongodConfigBuilder()
-                .version(version)
-                .net(new Net(port, Network.localhostIsIPv6()))
-                .build();
-        MONGO = MongodStarter.getDefaultInstance().prepare(config);
-        MONGO.start();
-    }
-
-    @AfterAll
-    public static void stopMongoDatabase() {
-        if (MONGO != null) {
-            MONGO.stop();
-        }
     }
 
     @Test
@@ -141,6 +115,34 @@ class BookResourceTest {
     @Test
     public void testReactiveClients() {
         callTheEndpoint("/reactive-books");
+    }
+
+    @Test
+    public void health() throws Exception {
+        RestAssured.when().get("/health/ready").then()
+                .body("status", is("UP"),
+                        "checks.status", containsInAnyOrder("UP"),
+                        "checks.name", containsInAnyOrder("MongoDB connection health check"));
+    }
+
+    @Test
+    public void testVehicleEndpoint() {
+        Car car = new Car();
+        car.name = "Renault Clio";
+        car.type = "CAR";
+        car.seatNumber = 5;
+        RestAssured.given().header("Content-Type", "application/json").body(car)
+                .when().post("/vehicles")
+                .then().statusCode(201);
+
+        Moto moto = new Moto();
+        moto.name = "Harley Davidson Sportster";
+        moto.type = "MOTO";
+        RestAssured.given().header("Content-Type", "application/json").body(moto)
+                .when().post("/vehicles")
+                .then().statusCode(201);
+
+        get("/vehicles").then().statusCode(200).body("size()", is(2));
     }
 
 }

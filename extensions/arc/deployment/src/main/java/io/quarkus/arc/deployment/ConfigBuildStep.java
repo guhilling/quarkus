@@ -27,11 +27,11 @@ import io.quarkus.arc.processor.DotNames;
 import io.quarkus.arc.processor.InjectionPointInfo;
 import io.quarkus.arc.runtime.ConfigBeanCreator;
 import io.quarkus.arc.runtime.ConfigRecorder;
-import io.quarkus.arc.runtime.QuarkusConfigProducer;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.smallrye.config.inject.ConfigProducer;
 
 /**
  * MicroProfile Config related build steps.
@@ -44,7 +44,7 @@ public class ConfigBuildStep {
 
     @BuildStep
     AdditionalBeanBuildItem bean() {
-        return new AdditionalBeanBuildItem(QuarkusConfigProducer.class);
+        return new AdditionalBeanBuildItem(ConfigProducer.class);
     }
 
     @BuildStep
@@ -96,11 +96,8 @@ public class ConfigBuildStep {
                     // No need to validate properties with default values
                     continue;
                 }
-                String propertyType = requiredType.name().toString();
-                if (requiredType.kind() != Kind.ARRAY && requiredType.kind() != Kind.PRIMITIVE) {
-                    reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, propertyType));
-                }
-                configProperties.produce(new ConfigPropertyBuildItem(propertyName, propertyType));
+
+                configProperties.produce(new ConfigPropertyBuildItem(propertyName, requiredType));
             }
         }
 
@@ -127,12 +124,21 @@ public class ConfigBuildStep {
     @BuildStep
     @Record(RUNTIME_INIT)
     void validateConfigProperties(ConfigRecorder recorder, List<ConfigPropertyBuildItem> configProperties,
-            BeanContainerBuildItem beanContainer) {
+            BeanContainerBuildItem beanContainer, BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
         // IMPL NOTE: we do depend on BeanContainerBuildItem to make sure that the BeanDeploymentValidator finished its processing
+
+        // the non-primitive types need to be registered for reflection since Class.forName is used at runtime to load the class
+        for (ConfigPropertyBuildItem item : configProperties) {
+            Type requiredType = item.getPropertyType();
+            String propertyType = requiredType.name().toString();
+            if (requiredType.kind() != Kind.PRIMITIVE) {
+                reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, propertyType));
+            }
+        }
 
         Map<String, Set<String>> propNamesToClasses = configProperties.stream().collect(
                 groupingBy(ConfigPropertyBuildItem::getPropertyName,
-                        mapping(ConfigPropertyBuildItem::getPropertyType, toSet())));
+                        mapping(c -> c.getPropertyType().name().toString(), toSet())));
         recorder.validateConfigProperties(propNamesToClasses);
     }
 
@@ -151,21 +157,20 @@ public class ConfigBuildStep {
             return false;
         }
         if (type.kind() == Kind.PRIMITIVE) {
-            switch (type.asPrimitiveType().primitive()) {
-                case BOOLEAN:
-                case DOUBLE:
-                case FLOAT:
-                case LONG:
-                case INT:
-                    return true;
-                default:
-                    return false;
-            }
+            return true;
         }
-        return DotNames.STRING.equals(type.name()) || DotNames.OPTIONAL.equals(type.name()) || SET_NAME.equals(type.name())
-                || LIST_NAME.equals(type.name()) || DotNames.LONG.equals(type.name()) || DotNames.FLOAT.equals(type.name())
-                || DotNames.INTEGER.equals(type.name()) || DotNames.BOOLEAN.equals(type.name())
-                || DotNames.DOUBLE.equals(type.name());
+        return DotNames.STRING.equals(type.name()) ||
+                DotNames.OPTIONAL.equals(type.name()) ||
+                SET_NAME.equals(type.name()) ||
+                LIST_NAME.equals(type.name()) ||
+                DotNames.LONG.equals(type.name()) ||
+                DotNames.FLOAT.equals(type.name()) ||
+                DotNames.INTEGER.equals(type.name()) ||
+                DotNames.BOOLEAN.equals(type.name()) ||
+                DotNames.DOUBLE.equals(type.name()) ||
+                DotNames.SHORT.equals(type.name()) ||
+                DotNames.BYTE.equals(type.name()) ||
+                DotNames.CHARACTER.equals(type.name());
     }
 
 }

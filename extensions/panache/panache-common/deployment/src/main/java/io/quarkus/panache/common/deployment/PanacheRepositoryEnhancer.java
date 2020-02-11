@@ -1,5 +1,6 @@
 package io.quarkus.panache.common.deployment;
 
+import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -14,6 +15,8 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
+
+import io.quarkus.gizmo.Gizmo;
 
 public abstract class PanacheRepositoryEnhancer implements BiFunction<String, ClassVisitor, ClassVisitor> {
     private static final DotName OBJECT_DOT_NAME = DotName.createSimple(Object.class.getName());
@@ -35,12 +38,14 @@ public abstract class PanacheRepositoryEnhancer implements BiFunction<String, Cl
         protected String entitySignature;
         protected String entityBinaryType;
         protected String daoBinaryName;
+        protected ClassInfo daoClassInfo;
         protected ClassInfo panacheRepositoryBaseClassInfo;
         protected IndexView indexView;
 
         public PanacheRepositoryClassVisitor(String className, ClassVisitor outputClassVisitor,
                 ClassInfo panacheRepositoryBaseClassInfo, IndexView indexView) {
-            super(Opcodes.ASM7, outputClassVisitor);
+            super(Gizmo.ASM_API_VERSION, outputClassVisitor);
+            daoClassInfo = indexView.getClassByName(DotName.createSimple(className));
             daoBinaryName = className.replace('.', '/');
             this.panacheRepositoryBaseClassInfo = panacheRepositoryBaseClassInfo;
             this.indexView = indexView;
@@ -90,32 +95,26 @@ public abstract class PanacheRepositoryEnhancer implements BiFunction<String, Cl
                 return null;
             }
 
-            final ClassInfo classByName = indexView.getClassByName(clazz);
-            for (org.jboss.jandex.Type type : classByName.interfaceTypes()) {
-                if (type.name().equals(repositoryDotName)) {
-                    org.jboss.jandex.Type entityType = type.asParameterizedType().arguments().get(0);
-                    return entityType.name().toString().replace('.', '/');
-                }
-            }
-
-            return recursivelyFindEntityTypeFromClass(classByName.superName(), repositoryDotName);
-        }
-
-        @Override
-        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-            // FIXME: do not add method if already present
-            return super.visitMethod(access, name, descriptor, signature, exceptions);
+            List<org.jboss.jandex.Type> typeParameters = io.quarkus.deployment.util.JandexUtil
+                    .resolveTypeParameters(clazz, repositoryDotName, indexView);
+            if (typeParameters.isEmpty())
+                throw new IllegalStateException(
+                        "Failed to find supertype " + repositoryDotName + " from entity class " + clazz);
+            org.jboss.jandex.Type entityType = typeParameters.get(0);
+            return entityType.name().toString().replace('.', '/');
         }
 
         @Override
         public void visitEnd() {
-
             for (MethodInfo method : panacheRepositoryBaseClassInfo.methods()) {
-                AnnotationInstance bridge = method.annotation(JandexUtil.DOTNAME_GENERATE_BRIDGE);
-                if (bridge != null)
-                    generateMethod(method, bridge.value("targetReturnTypeErased"));
+                // Do not generate a method that already exists
+                if (!JandexUtil.containsMethod(daoClassInfo, method)) {
+                    AnnotationInstance bridge = method.annotation(JandexUtil.DOTNAME_GENERATE_BRIDGE);
+                    if (bridge != null) {
+                        generateMethod(method, bridge.value("targetReturnTypeErased"));
+                    }
+                }
             }
-
             super.visitEnd();
         }
 
@@ -127,9 +126,9 @@ public abstract class PanacheRepositoryEnhancer implements BiFunction<String, Cl
             String castTo = null;
             if (targetReturnTypeErased != null && targetReturnTypeErased.asBoolean()) {
                 org.jboss.jandex.Type type = method.returnType();
-                if (type.kind() == Kind.TYPE_VARIABLE) {
-                    if (type.asTypeVariable().identifier().equals("Entity"))
-                        castTo = entityBinaryType;
+                if (type.kind() == Kind.TYPE_VARIABLE &&
+                        type.asTypeVariable().identifier().equals("Entity")) {
+                    castTo = entityBinaryType;
                 }
                 if (castTo == null)
                     castTo = type.name().toString('/');
@@ -166,5 +165,12 @@ public abstract class PanacheRepositoryEnhancer implements BiFunction<String, Cl
             mv.visitMaxs(0, 0);
             mv.visitEnd();
         }
+    }
+
+    public static boolean skipRepository(ClassInfo classInfo) {
+        // we don't want to add methods to abstract/generic entities/repositories: they get added to bottom types
+        // which can't be either
+        return Modifier.isAbstract(classInfo.flags())
+                || !classInfo.typeParameters().isEmpty();
     }
 }

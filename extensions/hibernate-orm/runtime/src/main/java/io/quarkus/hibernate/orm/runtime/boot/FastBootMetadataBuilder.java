@@ -71,6 +71,7 @@ import org.hibernate.jpa.boot.spi.TypeContributorList;
 import org.hibernate.jpa.internal.util.LogHelper;
 import org.hibernate.jpa.internal.util.PersistenceUnitTransactionTypeHelper;
 import org.hibernate.jpa.spi.IdentifierGeneratorStrategyProvider;
+import org.hibernate.resource.jdbc.spi.PhysicalConnectionHandlingMode;
 import org.hibernate.resource.transaction.backend.jdbc.internal.JdbcResourceLocalTransactionCoordinatorBuilderImpl;
 import org.hibernate.resource.transaction.backend.jta.internal.JtaTransactionCoordinatorBuilderImpl;
 import org.hibernate.service.Service;
@@ -247,6 +248,16 @@ public class FastBootMetadataBuilder {
 
         cfg.put("hibernate.temp.use_jdbc_metadata_defaults", "false");
 
+        //This shouldn't be encouraged but sometimes it's really useful - and it used to be the default
+        //in Hibernate ORM before the JPA spec would require to change this.
+        //At this time of transitioning we'll only expose it as a global system property, so to allow usage
+        //for special circumstances and yet not encourage this.
+        //Also, definitely don't override anything which was explicitly set in the configuration.
+        if (!cfg.containsKey(AvailableSettings.ALLOW_UPDATE_OUTSIDE_TRANSACTION)) {
+            cfg.put(AvailableSettings.ALLOW_UPDATE_OUTSIDE_TRANSACTION,
+                    Boolean.getBoolean(AvailableSettings.ALLOW_UPDATE_OUTSIDE_TRANSACTION));
+        }
+
         //Enable the new Enhanced Proxies capability (unless it was specifically disabled):
         if (!cfg.containsKey(AvailableSettings.ALLOW_ENHANCEMENT_AS_PROXY)) {
             cfg.put(AvailableSettings.ALLOW_ENHANCEMENT_AS_PROXY, Boolean.TRUE.toString());
@@ -257,6 +268,22 @@ public class FastBootMetadataBuilder {
         }
         //Agroal already does disable auto-commit, so Hibernate ORM should trust that:
         cfg.put(AvailableSettings.CONNECTION_PROVIDER_DISABLES_AUTOCOMMIT, Boolean.TRUE.toString());
+
+        /**
+         * Set CONNECTION_HANDLING to DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION
+         * as it generally performs better, at no drawbacks.
+         * The reason it's not the default in Hibernate ORM is that some containers suspect it to leak connections
+         * when running in this mode, as they trace resource handling across different beans.
+         * 
+         * @see org.hibernate.resource.jdbc.spi.PhysicalConnectionHandlingMode
+         */
+        {
+            final Object explicitSetting = cfg.get(AvailableSettings.CONNECTION_HANDLING);
+            if (explicitSetting == null) {
+                cfg.put(AvailableSettings.CONNECTION_HANDLING,
+                        PhysicalConnectionHandlingMode.DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION);
+            }
+        }
 
         if (readBooleanConfigurationValue(cfg, WRAP_RESULT_SETS)) {
             LOG.warn("Wrapping result sets is not supported. Setting " + WRAP_RESULT_SETS + " to false.");

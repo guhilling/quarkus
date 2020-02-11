@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
+import io.quarkus.arc.config.ConfigProperties;
 import io.quarkus.runtime.annotations.ConfigItem;
 import io.quarkus.runtime.annotations.ConfigRoot;
 
@@ -49,6 +50,23 @@ public class ArcConfig {
      */
     @ConfigItem(defaultValue = "true")
     public boolean autoInjectFields;
+
+    /**
+     * If set to true, Arc will transform the bytecode of beans containing methods that need to be proxyable
+     * but have been declared as final. The transformation is simply a matter of removing final.
+     * This ensures that a proxy can be created properly.
+     * If the value is set to false, then an exception is thrown at build time indicating
+     * that a proxy could not be created because a method was final.
+     */
+    @ConfigItem(defaultValue = "true")
+    public boolean removeFinalForProxyableMethods;
+
+    /**
+     * The default naming strategy for {@link ConfigProperties.NamingStrategy}. The allowed values are determined
+     * by that enum
+     */
+    @ConfigItem(defaultValue = "kebab-case")
+    public ConfigProperties.NamingStrategy configPropertiesDefaultNamingStrategy;
 
     public final boolean isRemoveUnusedBeansFieldValid() {
         return ALLOWED_REMOVE_UNUSED_BEANS_VALUES.contains(removeUnusedBeans.toLowerCase());

@@ -104,7 +104,7 @@
                 </plugins>
             </build>
         </profile>
-    
+
         <profile>
             <id>native-image</id>
             <activation>
@@ -134,6 +134,7 @@
                     <plugin>
                         <groupId>io.quarkus</groupId>
                         <artifactId>quarkus-maven-plugin</artifactId>
+                        <version>${project.version}</version>
                         <executions>
                             <execution>
                                 <id>native-image</id>
@@ -146,12 +147,7 @@
                                     <enableHttpUrlHandler>true</enableHttpUrlHandler>
                                     <enableServer>false</enableServer>
                                     <dumpProxies>false</dumpProxies>
-                                    <!-- Requires Quarkus Graal fork to work, will fail otherwise
-                                      <enableRetainedHeapReporting>true</enableRetainedHeapReporting>
-                                      <enableCodeSizeReporting>true</enableCodeSizeReporting>
-                                    -->
                                     <graalvmHome>${graalvmHome}</graalvmHome>
-                                    <enableJni>false</enableJni>
                                     <debugBuildProcess>false</debugBuildProcess>
                                 </configuration>
                             </execution>
@@ -182,6 +178,9 @@
                                     <name>mariadb:10.4</name>
                                     <alias>quarkus-test-mariadb</alias>
                                     <run>
+                                        <network>
+                                            <mode>bridge</mode>
+                                        </network>
                                         <ports>
                                             <port>3308:3306</port>
                                         </ports>

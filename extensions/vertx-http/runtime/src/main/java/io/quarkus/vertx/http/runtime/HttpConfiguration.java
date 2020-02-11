@@ -1,5 +1,7 @@
 package io.quarkus.vertx.http.runtime;
 
+import java.time.Duration;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 import io.quarkus.runtime.LaunchMode;
@@ -48,6 +50,20 @@ public class HttpConfiguration {
     public int testSslPort;
 
     /**
+     * If this is true then the address, scheme etc will be set from headers forwarded by the proxy server, such as
+     * {@code X-Forwarded-For}. This should only be set if you are behind a proxy that sets these headers.
+     */
+    @ConfigItem(defaultValue = "false")
+    public boolean proxyAddressForwarding;
+
+    /**
+     * If this is true and proxy address forwarding is enabled then the standard {@code Forwarded} header will be used,
+     * rather than the more common but not standard {@code X-Forwarded-For}.
+     */
+    @ConfigItem(defaultValue = "false")
+    public boolean allowForwarded;
+
+    /**
      * The CORS config
      */
     public CORSConfig cors;
@@ -69,16 +85,30 @@ public class HttpConfiguration {
     public OptionalInt ioThreads;
 
     /**
-     * If this is true then only a virtual channel will be set up for vertx web.
-     * We have this switch for testing purposes.
-     */
-    @ConfigItem(defaultValue = "false")
-    public boolean virtual;
-
-    /**
      * Server limits configuration
      */
     public ServerLimitsConfig limits;
+
+    /**
+     * Http connection idle timeout
+     */
+    @ConfigItem(defaultValue = "30M", name = "idle-timeout")
+    public Duration idleTimeout;
+
+    /**
+     * Request body related settings
+     */
+    public BodyConfig body;
+
+    /**
+     * The encryption key that is used to store persistent logins (e.g. for form auth). Logins are stored in a persistent
+     * cookie that is encrypted with AES-256 using a key derived from a SHA-256 hash of the key that is provided here.
+     *
+     * If no key is provided then an in-memory one will be generated, this will change on every restart though so it
+     * is not suitable for production environments. This must be more than 16 characters long for security reasons
+     */
+    @ConfigItem(name = "auth.session.encryption-key")
+    public Optional<String> encryptionKey;
 
     public int determinePort(LaunchMode launchMode) {
         return launchMode == LaunchMode.TEST ? testPort : port;

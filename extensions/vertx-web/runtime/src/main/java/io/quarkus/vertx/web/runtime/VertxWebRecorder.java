@@ -1,19 +1,14 @@
 package io.quarkus.vertx.web.runtime;
 
 import java.lang.reflect.InvocationTargetException;
-import java.util.Optional;
 import java.util.function.Function;
 
 import io.quarkus.runtime.annotations.Recorder;
-import io.quarkus.runtime.configuration.MemorySize;
-import io.quarkus.vertx.http.runtime.HttpConfiguration;
 import io.quarkus.vertx.http.runtime.RouterProducer;
-import io.quarkus.vertx.web.Route;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
-import io.vertx.ext.web.handler.BodyHandler;
 
 @Recorder
 public class VertxWebRecorder {
@@ -30,51 +25,47 @@ public class VertxWebRecorder {
             return handlerClazz.getDeclaredConstructor().newInstance();
         } catch (InstantiationException | IllegalAccessException | ClassNotFoundException | NoSuchMethodException
                 | InvocationTargetException e) {
-            throw new IllegalStateException("Unable to create invoker: " + handlerClassName, e);
+            throw new IllegalStateException("Unable to create route handler: " + handlerClassName, e);
         }
     }
 
-    public Function<Router, io.vertx.ext.web.Route> createRouteFunction(Route routeAnnotation,
-            HttpConfiguration httpConfiguration) {
+    public Function<Router, io.vertx.ext.web.Route> createRouteFunction(RouteMatcher matcher,
+            Handler<RoutingContext> bodyHandler) {
         return new Function<Router, io.vertx.ext.web.Route>() {
             @Override
             public io.vertx.ext.web.Route apply(Router router) {
                 io.vertx.ext.web.Route route;
-                if (!routeAnnotation.regex().isEmpty()) {
-                    route = router.routeWithRegex(routeAnnotation.regex());
-                } else if (!routeAnnotation.path().isEmpty()) {
-                    route = router.route(routeAnnotation.path());
+                if (matcher.getRegex() != null && !matcher.getRegex().isEmpty()) {
+                    route = router.routeWithRegex(matcher.getRegex());
+                } else if (matcher.getPath() != null && !matcher.getPath().isEmpty()) {
+                    route = router.route(matcher.getPath());
                 } else {
                     route = router.route();
                 }
-                if (routeAnnotation.methods().length > 0) {
-                    for (HttpMethod method : routeAnnotation.methods()) {
+                if (matcher.getMethods().length > 0) {
+                    for (HttpMethod method : matcher.getMethods()) {
                         route.method(method);
                     }
                 }
-                if (routeAnnotation.order() != Integer.MIN_VALUE) {
-                    route.order(routeAnnotation.order());
+                if (matcher.getOrder() > 0) {
+                    route.order(matcher.getOrder());
                 }
-                if (routeAnnotation.produces().length > 0) {
-                    for (String produces : routeAnnotation.produces()) {
+                if (matcher.getProduces().length > 0) {
+                    for (String produces : matcher.getProduces()) {
                         route.produces(produces);
                     }
                 }
-                if (routeAnnotation.consumes().length > 0) {
-                    for (String consumes : routeAnnotation.consumes()) {
+                if (matcher.getConsumes().length > 0) {
+                    for (String consumes : matcher.getConsumes()) {
                         route.consumes(consumes);
                     }
                 }
-
-                BodyHandler bodyHandler = BodyHandler.create();
-                Optional<MemorySize> maxBodySize = httpConfiguration.limits.maxBodySize;
-                if (maxBodySize.isPresent()) {
-                    bodyHandler.setBodyLimit(maxBodySize.get().asLongValue());
+                if (bodyHandler != null) {
+                    route.handler(bodyHandler);
                 }
-
-                route.handler(bodyHandler);
                 return route;
             }
         };
     }
+
 }

@@ -6,10 +6,10 @@ import org.hibernate.type.EnumType;
 import antlr.CommonToken;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 
 /**
- * This list of classes which any Hibernate ORM using application should register for reflective access on SubstrateVM.
+ * This list of classes which any Hibernate ORM using application should register for reflective access in native mode.
  * <p>
  * FIXME Find a reliable way to identify these and maintain the list accurate: the current list
  * is likely not complete as it was identified via a dumb "trial&error" strategy.
@@ -55,7 +55,9 @@ public final class HibernateOrmReflections {
 
         //Various well known needs:
         simpleConstructor(reflectiveClass, org.hibernate.tuple.entity.PojoEntityTuplizer.class);
+        simpleConstructor(reflectiveClass, org.hibernate.tuple.entity.DynamicMapEntityTuplizer.class);
         allConstructors(reflectiveClass, org.hibernate.tuple.component.PojoComponentTuplizer.class);
+        simpleConstructor(reflectiveClass, org.hibernate.tuple.component.DynamicMapComponentTuplizer.class);
         allConstructors(reflectiveClass, org.hibernate.persister.collection.OneToManyPersister.class);
         allConstructors(reflectiveClass, org.hibernate.persister.collection.BasicCollectionPersister.class);
         simpleConstructor(reflectiveClass, org.hibernate.persister.entity.SingleTableEntityPersister.class);
@@ -126,6 +128,14 @@ public final class HibernateOrmReflections {
         simpleConstructor(reflectiveClass, org.hibernate.hql.internal.ast.tree.LiteralNode.class);
         simpleConstructor(reflectiveClass, org.hibernate.hql.internal.ast.tree.BinaryArithmeticOperatorNode.class);
         simpleConstructor(reflectiveClass, CommonToken.class);
+
+        // Support for @OrderBy
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.NodeSupport.class);
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.OrderByFragment.class);
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.SortSpecification.class);
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.OrderingSpecification.class);
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.CollationSpecification.class);
+        simpleConstructor(reflectiveClass, org.hibernate.sql.ordering.antlr.SortKey.class);
 
         //The CoreMessageLogger is sometimes looked up without it necessarily being a field, so we're
         //not processing it the same way as other Logger lookups.

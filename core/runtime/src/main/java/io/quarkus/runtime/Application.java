@@ -1,5 +1,6 @@
 package io.quarkus.runtime;
 
+import java.io.Closeable;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.LockSupport;
@@ -20,7 +21,7 @@ import sun.misc.SignalHandler;
  * setup logic. The base class does some basic error checking.
  */
 @SuppressWarnings("restriction")
-public abstract class Application {
+public abstract class Application implements Closeable {
 
     // WARNING: do not inject a logger here, it's too early: the log manager has not been properly set up yet
 
@@ -36,15 +37,10 @@ public abstract class Application {
     private final Lock stateLock = Locks.reentrantLock();
     private final Condition stateCond = stateLock.newCondition();
 
+    private String name;
     private int state = ST_INITIAL;
     private volatile boolean shutdownRequested;
     private static volatile Application currentApplication;
-
-    /**
-     * The generated config code will install a new resolver, we save the original one here and make sure
-     * to restore it on shutdown.
-     */
-    private final static ConfigProviderResolver originalResolver = ConfigProviderResolver.instance();
 
     /**
      * Construct a new instance.
@@ -112,6 +108,20 @@ public abstract class Application {
 
     protected abstract void doStart(String[] args);
 
+    public final void close() {
+        try {
+            stop();
+        } finally {
+            try {
+                ConfigProviderResolver.instance()
+                        .releaseConfig(
+                                ConfigProviderResolver.instance().getConfig(Thread.currentThread().getContextClassLoader()));
+            } catch (Throwable ignored) {
+
+            }
+        }
+    }
+
     /**
      * Stop the application. If another thread is also trying to stop the application, this method waits for that
      * thread to finish. Returns immediately if the application is already stopped. If an exception is thrown during
@@ -160,11 +170,10 @@ public abstract class Application {
             doStop();
         } finally {
             currentApplication = null;
-            ConfigProviderResolver.setInstance(originalResolver);
             stateLock.lock();
             try {
                 state = ST_STOPPED;
-                Timing.printStopTime();
+                Timing.printStopTime(name);
                 stateCond.signalAll();
             } finally {
                 stateLock.unlock();
@@ -177,6 +186,10 @@ public abstract class Application {
     }
 
     protected abstract void doStop();
+
+    public void setName(String name) {
+        this.name = name;
+    }
 
     /**
      * Run the application as if it were in a standalone JVM.

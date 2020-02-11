@@ -2,13 +2,14 @@ package io.quarkus.arc.processor;
 
 import static io.quarkus.arc.processor.IndexClassLookupUtils.getClassByName;
 
-import io.quarkus.arc.GenericArrayTypeImpl;
-import io.quarkus.arc.ParameterizedTypeImpl;
-import io.quarkus.arc.TypeVariableImpl;
-import io.quarkus.arc.WildcardTypeImpl;
+import io.quarkus.arc.impl.GenericArrayTypeImpl;
+import io.quarkus.arc.impl.ParameterizedTypeImpl;
+import io.quarkus.arc.impl.TypeVariableImpl;
+import io.quarkus.arc.impl.WildcardTypeImpl;
 import io.quarkus.gizmo.BytecodeCreator;
 import io.quarkus.gizmo.MethodDescriptor;
 import io.quarkus.gizmo.ResultHandle;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationValue;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
@@ -31,6 +33,7 @@ import org.jboss.jandex.Type;
 import org.jboss.jandex.Type.Kind;
 import org.jboss.jandex.TypeVariable;
 import org.jboss.jandex.WildcardType;
+import org.jboss.logging.Logger;
 
 /**
  *
@@ -38,14 +41,29 @@ import org.jboss.jandex.WildcardType;
  */
 final class Types {
 
+    static final Logger LOGGER = Logger.getLogger(Types.class);
+
     private static final Type OBJECT_TYPE = Type.create(DotNames.OBJECT, Kind.CLASS);
+
+    // we ban these interfaces because they are new to Java 12 and are used by java.lang.String which
+    // means that they cannot be included in bytecode if we want to have application built with Java 12+ but targeting Java 8 - 11
+    // actually run on those older versions
+    // TODO:  add a extensible banning mechanism based on predicates if we find that this set needs to grow...
+    private static final Set<DotName> BANNED_INTERFACE_TYPES = new HashSet<>(
+            Arrays.asList(DotName.createSimple("java.lang.constant.ConstantDesc"),
+                    DotName.createSimple("java.lang.constant.Constable")));
 
     private Types() {
     }
 
     static ResultHandle getTypeHandle(BytecodeCreator creator, Type type) {
+        return getTypeHandle(creator, type, null);
+    }
+
+    static ResultHandle getTypeHandle(BytecodeCreator creator, Type type, ResultHandle tccl) {
         if (Kind.CLASS.equals(type.kind())) {
-            return creator.loadClass(type.asClassType().name().toString());
+            String className = type.asClassType().name().toString();
+            return doLoadClass(creator, className, tccl);
         } else if (Kind.TYPE_VARIABLE.equals(type.kind())) {
             // E.g. T -> new TypeVariableImpl("T")
             TypeVariable typeVariable = type.asTypeVariable();
@@ -56,7 +74,7 @@ final class Types {
             } else {
                 boundsHandle = creator.newArray(java.lang.reflect.Type.class, creator.load(bounds.size()));
                 for (int i = 0; i < bounds.size(); i++) {
-                    creator.writeArrayValue(boundsHandle, i, getTypeHandle(creator, bounds.get(i)));
+                    creator.writeArrayValue(boundsHandle, i, getTypeHandle(creator, bounds.get(i), tccl));
                 }
             }
             return creator.newInstance(
@@ -70,18 +88,18 @@ final class Types {
             List<Type> arguments = parameterizedType.arguments();
             ResultHandle typeArgsHandle = creator.newArray(java.lang.reflect.Type.class, creator.load(arguments.size()));
             for (int i = 0; i < arguments.size(); i++) {
-                creator.writeArrayValue(typeArgsHandle, i, getTypeHandle(creator, arguments.get(i)));
+                creator.writeArrayValue(typeArgsHandle, i, getTypeHandle(creator, arguments.get(i), tccl));
             }
             return creator.newInstance(
                     MethodDescriptor.ofConstructor(ParameterizedTypeImpl.class, java.lang.reflect.Type.class,
                             java.lang.reflect.Type[].class),
-                    creator.loadClass(parameterizedType.name().toString()), typeArgsHandle);
+                    doLoadClass(creator, parameterizedType.name().toString(), tccl), typeArgsHandle);
 
         } else if (Kind.ARRAY.equals(type.kind())) {
             Type componentType = type.asArrayType().component();
             // E.g. String[] -> new GenericArrayTypeImpl(String.class)
             return creator.newInstance(MethodDescriptor.ofConstructor(GenericArrayTypeImpl.class, java.lang.reflect.Type.class),
-                    getTypeHandle(creator, componentType));
+                    getTypeHandle(creator, componentType, tccl));
 
         } else if (Kind.WILDCARD_TYPE.equals(type.kind())) {
             // E.g. ? extends Number -> WildcardTypeImpl.withUpperBound(Number.class)
@@ -91,12 +109,12 @@ final class Types {
                 return creator.invokeStaticMethod(
                         MethodDescriptor.ofMethod(WildcardTypeImpl.class, "withUpperBound",
                                 java.lang.reflect.WildcardType.class, java.lang.reflect.Type.class),
-                        getTypeHandle(creator, wildcardType.extendsBound()));
+                        getTypeHandle(creator, wildcardType.extendsBound(), tccl));
             } else {
                 return creator.invokeStaticMethod(
                         MethodDescriptor.ofMethod(WildcardTypeImpl.class, "withLowerBound",
                                 java.lang.reflect.WildcardType.class, java.lang.reflect.Type.class),
-                        getTypeHandle(creator, wildcardType.superBound()));
+                        getTypeHandle(creator, wildcardType.superBound(), tccl));
             }
         } else if (Kind.PRIMITIVE.equals(type.kind())) {
             switch (type.asPrimitiveType().primitive()) {
@@ -124,6 +142,16 @@ final class Types {
         }
     }
 
+    private static ResultHandle doLoadClass(BytecodeCreator creator, String className, ResultHandle tccl) {
+        //we need to use Class.forName as the class may be package private
+        if (tccl == null) {
+            ResultHandle currentThread = creator
+                    .invokeStaticMethod(MethodDescriptors.THREAD_CURRENT_THREAD);
+            tccl = creator.invokeVirtualMethod(MethodDescriptors.THREAD_GET_TCCL, currentThread);
+        }
+        return creator.invokeStaticMethod(MethodDescriptors.CL_FOR_NAME, creator.load(className), creator.load(true), tccl);
+    }
+
     static Type getProviderType(ClassInfo classInfo) {
         List<TypeVariable> typeParameters = classInfo.typeParameters();
         if (!typeParameters.isEmpty()) {
@@ -148,9 +176,9 @@ final class Types {
                         "Producer method return type not found in index: " + producerMethod.returnType().name());
             }
             if (Kind.CLASS.equals(returnType.kind())) {
-                types = getTypeClosure(returnTypeClassInfo, Collections.emptyMap(), beanDeployment, null);
+                types = getTypeClosure(returnTypeClassInfo, producerMethod, Collections.emptyMap(), beanDeployment, null);
             } else if (Kind.PARAMETERIZED_TYPE.equals(returnType.kind())) {
-                types = getTypeClosure(returnTypeClassInfo,
+                types = getTypeClosure(returnTypeClassInfo, producerMethod,
                         buildResolvedMap(returnType.asParameterizedType().arguments(), returnTypeClassInfo.typeParameters(),
                                 Collections.emptyMap(), beanDeployment.getIndex()),
                         beanDeployment, null);
@@ -174,9 +202,9 @@ final class Types {
                 throw new IllegalArgumentException("Producer field type not found in index: " + producerField.type().name());
             }
             if (Kind.CLASS.equals(fieldType.kind())) {
-                types = getTypeClosure(fieldClassInfo, Collections.emptyMap(), beanDeployment, null);
+                types = getTypeClosure(fieldClassInfo, producerField, Collections.emptyMap(), beanDeployment, null);
             } else if (Kind.PARAMETERIZED_TYPE.equals(fieldType.kind())) {
-                types = getTypeClosure(fieldClassInfo,
+                types = getTypeClosure(fieldClassInfo, producerField,
                         buildResolvedMap(fieldType.asParameterizedType().arguments(), fieldClassInfo.typeParameters(),
                                 Collections.emptyMap(), beanDeployment.getIndex()),
                         beanDeployment, null);
@@ -191,15 +219,16 @@ final class Types {
         Set<Type> types;
         List<TypeVariable> typeParameters = classInfo.typeParameters();
         if (typeParameters.isEmpty()) {
-            types = getTypeClosure(classInfo, Collections.emptyMap(), beanDeployment, null);
+            types = getTypeClosure(classInfo, null, Collections.emptyMap(), beanDeployment, null);
         } else {
-            types = getTypeClosure(classInfo, buildResolvedMap(typeParameters, typeParameters,
+            types = getTypeClosure(classInfo, null, buildResolvedMap(typeParameters, typeParameters,
                     Collections.emptyMap(), beanDeployment.getIndex()), beanDeployment, null);
         }
         return restrictBeanTypes(types, beanDeployment.getAnnotations(classInfo));
     }
 
-    static Set<Type> getTypeClosure(ClassInfo classInfo, Map<TypeVariable, Type> resolvedTypeParameters,
+    static Set<Type> getTypeClosure(ClassInfo classInfo, AnnotationTarget producerFieldOrMethod,
+            Map<TypeVariable, Type> resolvedTypeParameters,
             BeanDeployment beanDeployment, BiConsumer<ClassInfo, Map<TypeVariable, Type>> resolvedTypeVariablesConsumer) {
         Set<Type> types = new HashSet<>();
         List<TypeVariable> typeParameters = classInfo.typeParameters();
@@ -210,8 +239,19 @@ final class Types {
         } else {
             // Canonical ParameterizedType with unresolved type variables
             Type[] typeParams = new Type[typeParameters.size()];
+            boolean skipThisType = false;
             for (int i = 0; i < typeParameters.size(); i++) {
                 typeParams[i] = resolvedTypeParameters.get(typeParameters.get(i));
+                // this should only be the case for producers; wildcard is not a legal bean type
+                // see https://docs.jboss.org/cdi/spec/2.0/cdi-spec.html#legal_bean_types
+                if (typeParams[i].kind().equals(Kind.WILDCARD_TYPE) && producerFieldOrMethod != null) {
+                    LOGGER.info("Producer " +
+                            (producerFieldOrMethod.kind().equals(AnnotationTarget.Kind.FIELD) ? "field " : "method ") +
+                            producerFieldOrMethod +
+                            " contains a parameterized typed with a wildcard. This type is not a legal bean type" +
+                            " according to CDI specification and will be ignored during bean resolution.");
+                    skipThisType = true;
+                }
             }
             if (resolvedTypeVariablesConsumer != null) {
                 Map<TypeVariable, Type> resolved = new HashMap<>();
@@ -220,10 +260,15 @@ final class Types {
                 }
                 resolvedTypeVariablesConsumer.accept(classInfo, resolved);
             }
-            types.add(ParameterizedType.create(classInfo.name(), typeParams, null));
+            if (!skipThisType) {
+                types.add(ParameterizedType.create(classInfo.name(), typeParams, null));
+            }
         }
         // Interfaces
         for (Type interfaceType : classInfo.interfaceTypes()) {
+            if (BANNED_INTERFACE_TYPES.contains(interfaceType.name())) {
+                continue;
+            }
             ClassInfo interfaceClassInfo = getClassByName(beanDeployment.getIndex(), interfaceType.name());
             if (interfaceClassInfo != null) {
                 Map<TypeVariable, Type> resolved = Collections.emptyMap();
@@ -231,7 +276,8 @@ final class Types {
                     resolved = buildResolvedMap(interfaceType.asParameterizedType().arguments(),
                             interfaceClassInfo.typeParameters(), resolvedTypeParameters, beanDeployment.getIndex());
                 }
-                types.addAll(getTypeClosure(interfaceClassInfo, resolved, beanDeployment, resolvedTypeVariablesConsumer));
+                types.addAll(getTypeClosure(interfaceClassInfo, producerFieldOrMethod, resolved, beanDeployment,
+                        resolvedTypeVariablesConsumer));
             }
         }
         // Superclass
@@ -244,7 +290,8 @@ final class Types {
                             superClassInfo.typeParameters(),
                             resolvedTypeParameters, beanDeployment.getIndex());
                 }
-                types.addAll(getTypeClosure(superClassInfo, resolved, beanDeployment, resolvedTypeVariablesConsumer));
+                types.addAll(getTypeClosure(superClassInfo, producerFieldOrMethod, resolved, beanDeployment,
+                        resolvedTypeVariablesConsumer));
             }
         }
         return types;
@@ -253,7 +300,7 @@ final class Types {
     static Map<ClassInfo, Map<TypeVariable, Type>> resolvedTypeVariables(ClassInfo classInfo,
             BeanDeployment beanDeployment) {
         Map<ClassInfo, Map<TypeVariable, Type>> resolvedTypeVariables = new HashMap<>();
-        getTypeClosure(classInfo, Collections.emptyMap(), beanDeployment, resolvedTypeVariables::put);
+        getTypeClosure(classInfo, null, Collections.emptyMap(), beanDeployment, resolvedTypeVariables::put);
         return resolvedTypeVariables;
     }
 
@@ -271,7 +318,8 @@ final class Types {
                     typedClasses.add(type.name());
                 }
                 for (Iterator<Type> iterator = types.iterator(); iterator.hasNext();) {
-                    if (!typedClasses.contains(iterator.next().name())) {
+                    Type nextType = iterator.next();
+                    if (!typedClasses.contains(nextType.name()) && !DotNames.OBJECT.equals(nextType.name())) {
                         iterator.remove();
                     }
                 }

@@ -1,15 +1,14 @@
 package io.quarkus.arc.deployment.configproperties;
 
-import static io.quarkus.arc.deployment.configproperties.ConfigPropertiesUtil.ReadOptionalResponse;
 import static io.quarkus.arc.deployment.configproperties.ConfigPropertiesUtil.createReadMandatoryValueAndConvertIfNeeded;
 import static io.quarkus.arc.deployment.configproperties.ConfigPropertiesUtil.createReadOptionalValueAndConvertIfNeeded;
 import static io.quarkus.arc.deployment.configproperties.ConfigPropertiesUtil.determineSingleGenericType;
 
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -26,6 +25,10 @@ import org.jboss.jandex.IndexView;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 
+import io.quarkus.arc.config.ConfigProperties;
+import io.quarkus.arc.deployment.ConfigPropertyBuildItem;
+import io.quarkus.arc.deployment.configproperties.ConfigPropertiesUtil.ReadOptionalResponse;
+import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.bean.JavaBeanUtil;
 import io.quarkus.deployment.util.HashUtil;
 import io.quarkus.gizmo.BranchResult;
@@ -112,8 +115,10 @@ final class ClassConfigPropertiesUtil {
     /**
      * @return true if the configuration class needs validation
      */
-    static boolean addProducerMethodForClassConfigProperties(ClassInfo configPropertiesClassInfo,
-            ClassCreator producerClassCreator, String prefixStr, IndexView applicationIndex) {
+    static boolean addProducerMethodForClassConfigProperties(ClassLoader classLoader, ClassInfo configPropertiesClassInfo,
+            ClassCreator producerClassCreator, String prefixStr, ConfigProperties.NamingStrategy namingStrategy,
+            IndexView applicationIndex,
+            BuildProducer<ConfigPropertyBuildItem> configProperties) {
 
         if (!DotNames.OBJECT.equals(configPropertiesClassInfo.superName())) {
             throw new IllegalArgumentException(
@@ -164,9 +169,8 @@ final class ClassConfigPropertiesUtil {
                 configObjectClassStr, produceMethodParameterTypes)) {
             methodCreator.addAnnotation(Produces.class);
 
-            ResultHandle configObject = populateConfigObject(configPropertiesClassInfo,
-                    prefixStr,
-                    methodCreator, applicationIndex);
+            ResultHandle configObject = populateConfigObject(classLoader, configPropertiesClassInfo, prefixStr, namingStrategy,
+                    methodCreator, applicationIndex, configProperties);
 
             if (needsValidation) {
                 createValidationCodePath(methodCreator, configObject, prefixStr);
@@ -195,11 +199,14 @@ final class ClassConfigPropertiesUtil {
         }
     }
 
-    private static ResultHandle populateConfigObject(ClassInfo configClassInfo,
-            String prefixStr,
-            MethodCreator methodCreator, IndexView applicationIndex) {
+    private static ResultHandle populateConfigObject(ClassLoader classLoader, ClassInfo configClassInfo, String prefixStr,
+            ConfigProperties.NamingStrategy namingStrategy, MethodCreator methodCreator, IndexView applicationIndex,
+            BuildProducer<ConfigPropertyBuildItem> configProperties) {
         String configObjectClassStr = configClassInfo.name().toString();
         ResultHandle configObject = methodCreator.newInstance(MethodDescriptor.ofConstructor(configObjectClassStr));
+
+        // Fields with a default value will be removed from this list at the end of the method.
+        List<ConfigPropertyBuildItemCandidate> configPropertyBuildItemCandidates = new ArrayList<>();
 
         // For each field of the class try to pull it out of MP Config and call the corresponding setter
         List<FieldInfo> fields = configClassInfo.fields();
@@ -240,13 +247,13 @@ final class ClassConfigPropertiesUtil {
                             "Nested configuration class " + fieldTypeClassInfo + " must be public ");
                 }
 
-                ResultHandle nestedConfigObject = populateConfigObject(fieldTypeClassInfo,
-                        prefixStr + "." + field.name(),
-                        methodCreator, applicationIndex);
+                ResultHandle nestedConfigObject = populateConfigObject(classLoader, fieldTypeClassInfo,
+                        prefixStr + "." + namingStrategy.getName(field.name()), namingStrategy, methodCreator,
+                        applicationIndex, configProperties);
                 createWriteValue(methodCreator, configObject, field, setter, useFieldAccess, nestedConfigObject);
 
             } else {
-                String fullConfigName = prefixStr + "." + field.name();
+                String fullConfigName = prefixStr + "." + namingStrategy.getName(field.name());
                 ResultHandle config = methodCreator.getMethodParam(0);
                 if (DotNames.OPTIONAL.equals(fieldTypeDotName)) {
                     Type genericType = determineSingleGenericType(field.type(),
@@ -286,16 +293,6 @@ final class ClassConfigPropertiesUtil {
                                     MethodDescriptor.ofMethod(configObjectClassStr, getterName, fieldTypeStr),
                                     configObject);
                         }
-
-                        /*
-                         * If the getter value is null (meaning that no default was set)
-                         * throw the exception that MP Config would.
-                         * If the value is not null, then we don't need to do anything since the class will already
-                         * contain the default value the user intended to use
-                         */
-                        isPresentFalse.ifNull(defaultValue).trueBranch()
-                                .throwException(NoSuchElementException.class,
-                                        "Property " + fullConfigName + " not found");
                     } else {
                         /*
                          * In this case we want a missing property to cause an exception that we don't handle
@@ -307,9 +304,19 @@ final class ClassConfigPropertiesUtil {
                         createWriteValue(methodCreator, configObject, field, setter, useFieldAccess, setterValue);
 
                     }
+                    configPropertyBuildItemCandidates
+                            .add(new ConfigPropertyBuildItemCandidate(field.name(), fullConfigName, fieldType));
                 }
             }
         }
+
+        ConfigPropertyBuildItemCandidateUtil.removePropertiesWithDefaultValue(classLoader, configObjectClassStr,
+                configPropertyBuildItemCandidates);
+        for (ConfigPropertyBuildItemCandidate candidate : configPropertyBuildItemCandidates) {
+            configProperties
+                    .produce(new ConfigPropertyBuildItem(candidate.getConfigPropertyName(), candidate.getConfigPropertyType()));
+        }
+
         return configObject;
     }
 
@@ -357,7 +364,7 @@ final class ClassConfigPropertiesUtil {
         ResultHandle validationResult = bytecodeCreator.invokeInterfaceMethod(
                 MethodDescriptor.ofMethod(VALIDATOR_CLASS, "validate", Set.class, Object.class, Class[].class),
                 bytecodeCreator.getMethodParam(1), configObject,
-                bytecodeCreator.newArray(Class.class, bytecodeCreator.load(0)));
+                bytecodeCreator.newArray(Class.class, 0));
         ResultHandle constraintSetIsEmpty = bytecodeCreator.invokeInterfaceMethod(
                 MethodDescriptor.ofMethod(Set.class, "isEmpty", boolean.class), validationResult);
         BranchResult constraintSetIsEmptyBranch = bytecodeCreator.ifNonZero(constraintSetIsEmpty);

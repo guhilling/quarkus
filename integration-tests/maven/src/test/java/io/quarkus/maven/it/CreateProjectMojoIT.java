@@ -19,14 +19,15 @@ import org.junit.jupiter.api.Test;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 
-import io.quarkus.maven.CreateProjectMojo;
 import io.quarkus.maven.it.verifier.RunningInvoker;
 import io.quarkus.maven.utilities.MojoUtils;
+import io.quarkus.platform.tools.ToolsConstants;
 
 /**
  * @author <a href="http://escoffier.me">Clement Escoffier</a>
  */
-public class CreateProjectMojoIT extends MojoTestBase {
+@DisableForNative
+public class CreateProjectMojoIT extends QuarkusPlatformAwareMojoTestBase {
 
     private Invoker invoker;
     private RunningInvoker running;
@@ -62,10 +63,11 @@ public class CreateProjectMojoIT extends MojoTestBase {
         Model model = loadPom(testDir);
         final DependencyManagement dependencyManagement = model.getDependencyManagement();
         final List<Dependency> dependencies = dependencyManagement.getDependencies();
-        assertThat(dependencies.stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                && d.getScope().equalsIgnoreCase("import")
-                && d.getType().equalsIgnoreCase("pom"))).isTrue();
+        assertThat(dependencies.stream()
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equals("import")
+                        && d.getType().equals("pom"))).isTrue();
 
         assertThat(
                 model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-resteasy")
@@ -83,22 +85,26 @@ public class CreateProjectMojoIT extends MojoTestBase {
         setup(new Properties());
 
         assertThat(new File(testDir, "pom.xml")).isFile();
-        assertThat(FileUtils.readFileToString(new File(testDir, "pom.xml"), "UTF-8"))
-                .contains(MojoUtils.getPluginGroupId(), MojoUtils.QUARKUS_VERSION_PROPERTY, MojoUtils.getPluginGroupId());
         assertThat(new File(testDir, "src/main/java")).isDirectory();
 
         assertThat(new File(testDir, "src/main/resources/application.properties")).exists();
         assertThat(new File(testDir, "src/main/resources/META-INF/resources/index.html")).exists();
 
         assertThat(FileUtils.readFileToString(new File(testDir, "pom.xml"), "UTF-8"))
-                .containsIgnoringCase(MojoUtils.getBomArtifactId());
+                .contains(getPluginArtifactId(), MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLUGIN_VERSION_VALUE,
+                        getPluginGroupId());
 
-        Model model = loadPom(testDir);
+        final Model model = loadPom(testDir);
+        assertThat(model.getProperties().getProperty(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLUGIN_VERSION_NAME))
+                .isEqualTo(getPluginVersion());
+        assertThat(model.getProperties().getProperty(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_NAME))
+                .isEqualTo(getBomArtifactId());
+
         assertThat(model.getDependencyManagement().getDependencies().stream()
-                .anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                        && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                        && d.getScope().equalsIgnoreCase("import")
-                        && d.getType().equalsIgnoreCase("pom"))).isTrue();
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equals("import")
+                        && d.getType().equals("pom"))).isTrue();
 
         assertThat(model.getDependencies()).isEmpty();
 
@@ -128,6 +134,23 @@ public class CreateProjectMojoIT extends MojoTestBase {
     }
 
     @Test
+    public void testProjectGenerationWithInvalidPackage() throws Exception {
+        testDir = initEmptyProject("projects/project-generation-invalid-package");
+        assertThat(testDir).isDirectory();
+        invoker = initInvoker(testDir);
+
+        Properties properties = new Properties();
+        properties.put("projectGroupId", "org.acme");
+        properties.put("projectArtifactId", "acme");
+        properties.put("className", "org.acme.invalid-package-name.MyResource");
+
+        InvocationResult result = setup(properties);
+
+        assertThat(result.getExitCode()).isNotZero();
+        assertThat(new File(testDir, "src/main/java/org/acme")).doesNotExist();
+    }
+
+    @Test
     public void testProjectGenerationFromMinimalPomWithResource() throws Exception {
         testDir = initProject("projects/simple-pom-it", "projects/project-generation-from-empty-pom-with-resource");
         assertThat(testDir).isDirectory();
@@ -137,7 +160,7 @@ public class CreateProjectMojoIT extends MojoTestBase {
         properties.put("className", "org.acme.MyResource.java");
         setup(properties);
 
-        check(new File(testDir, "pom.xml"), "quarkus.version");
+        check(new File(testDir, "pom.xml"), MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_NAME);
 
         assertThat(new File(testDir, "src/main/java")).isDirectory();
 
@@ -170,10 +193,10 @@ public class CreateProjectMojoIT extends MojoTestBase {
 
         Model model = loadPom(testDir);
         assertThat(model.getDependencyManagement().getDependencies().stream()
-                .anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                        && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                        && d.getScope().equalsIgnoreCase("import")
-                        && d.getType().equalsIgnoreCase("pom"))).isTrue();
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equals("import")
+                        && d.getType().equals("pom"))).isTrue();
 
         assertThat(
                 model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-resteasy")
@@ -207,10 +230,10 @@ public class CreateProjectMojoIT extends MojoTestBase {
 
         Model model = loadPom(testDir);
         assertThat(model.getDependencyManagement().getDependencies().stream()
-                .anyMatch(d -> d.getArtifactId().equalsIgnoreCase(MojoUtils.getBomArtifactId())
-                        && d.getVersion().equalsIgnoreCase("${quarkus.version}")
-                        && d.getScope().equalsIgnoreCase("import")
-                        && d.getType().equalsIgnoreCase("pom"))).isTrue();
+                .anyMatch(d -> d.getArtifactId().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_ARTIFACT_ID_VALUE)
+                        && d.getVersion().equals(MojoUtils.TEMPLATE_PROPERTY_QUARKUS_PLATFORM_VERSION_VALUE)
+                        && d.getScope().equals("import")
+                        && d.getType().equals("pom"))).isTrue();
 
         assertThat(
                 model.getDependencies().stream().anyMatch(d -> d.getArtifactId().equalsIgnoreCase("quarkus-resteasy")
@@ -300,7 +323,9 @@ public class CreateProjectMojoIT extends MojoTestBase {
         // As the directory is not empty (log) navigate to the artifactID directory
         testDir = new File(testDir, "acme");
         running = new RunningInvoker(testDir, false);
-        running.execute(Arrays.asList("compile", "quarkus:dev"), Collections.emptyMap());
+        final Properties mvnRunProps = new Properties();
+        mvnRunProps.setProperty("debug", "false");
+        running.execute(Arrays.asList("compile", "quarkus:dev"), Collections.emptyMap(), mvnRunProps);
 
         String resp = getHttpResponse();
 
@@ -313,10 +338,17 @@ public class CreateProjectMojoIT extends MojoTestBase {
 
     private InvocationResult setup(Properties params)
             throws MavenInvocationException, FileNotFoundException, UnsupportedEncodingException {
+
+        params.setProperty("platformGroupId", ToolsConstants.IO_QUARKUS);
+        params.setProperty("platformArtifactId", "quarkus-bom");
+        params.setProperty("platformVersion", getPluginVersion());
+
         InvocationRequest request = new DefaultInvocationRequest();
         request.setBatchMode(true);
         request.setGoals(Collections.singletonList(
-                CreateProjectMojo.PLUGIN_KEY + ":" + MojoUtils.getPluginVersion() + ":create"));
+                getPluginGroupId() + ":" + getPluginArtifactId() + ":" + getPluginVersion() + ":create"));
+        request.setDebug(false);
+        request.setShowErrors(false);
         request.setProperties(params);
         getEnv().forEach(request::addShellEnvironment);
         File log = new File(testDir, "build-create-" + testDir.getName() + ".log");

@@ -14,11 +14,20 @@ public class StartupContext implements Closeable {
     private static final Logger LOG = Logger.getLogger(StartupContext.class);
 
     private final Map<String, Object> values = new HashMap<>();
+    private Object lastValue;
+    // this is done to distinguish between the value never having been set and having been set as null
+    private boolean lastValueSet = false;
     private final List<Runnable> shutdownTasks = new ArrayList<>();
+    private final List<Runnable> lastShutdownTasks = new ArrayList<>();
     private final ShutdownContext shutdownContext = new ShutdownContext() {
         @Override
         public void addShutdownTask(Runnable runnable) {
             shutdownTasks.add(runnable);
+        }
+
+        @Override
+        public void addLastShutdownTask(Runnable runnable) {
+            lastShutdownTasks.add(runnable);
         }
     };
 
@@ -28,15 +37,32 @@ public class StartupContext implements Closeable {
 
     public void putValue(String name, Object value) {
         values.put(name, value);
+        lastValueSet = true;
+        this.lastValue = value;
     }
 
     public Object getValue(String name) {
         return values.get(name);
     }
 
+    public Object getLastValue() {
+        return lastValue;
+    }
+
+    public boolean isLastValueSet() {
+        return lastValueSet;
+    }
+
     @Override
     public void close() {
-        List<Runnable> toClose = new ArrayList<>(shutdownTasks);
+        runAllInReverseOrder(shutdownTasks);
+        shutdownTasks.clear();
+        runAllInReverseOrder(lastShutdownTasks);
+        lastShutdownTasks.clear();
+    }
+
+    private void runAllInReverseOrder(List<Runnable> tasks) {
+        List<Runnable> toClose = new ArrayList<>(tasks);
         Collections.reverse(toClose);
         for (Runnable r : toClose) {
             try {
@@ -45,6 +71,5 @@ public class StartupContext implements Closeable {
                 LOG.error("Running a shutdown task failed", e);
             }
         }
-        shutdownTasks.clear();
     }
 }

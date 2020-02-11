@@ -10,6 +10,8 @@ import org.jboss.jandex.Type.Kind;
 abstract class AbstractGenerator {
 
     static final String DEFAULT_PACKAGE = Arc.class.getPackage().getName() + ".generator";
+    static final String UNDERSCORE = "_";
+    static final String SYNTHETIC_SUFFIX = "Synthetic";
 
     /**
      * Create a generated bean name from a bean package. When bean is located
@@ -81,8 +83,8 @@ abstract class AbstractGenerator {
             }
         }
         String packageName = DotNames.packageName(providerTypeName);
-        if (packageName.startsWith("java.")) {
-            // It is not possible to place a class in a JDK package
+        if (packageName.isEmpty() || packageName.startsWith("java.")) {
+            // It is not possible to place a class in a JDK package or in default package
             packageName = DEFAULT_PACKAGE;
         }
         return packageName;

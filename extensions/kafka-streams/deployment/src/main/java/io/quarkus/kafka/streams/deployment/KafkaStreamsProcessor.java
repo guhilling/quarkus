@@ -22,16 +22,17 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
-import io.quarkus.deployment.builditem.JniBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.RuntimeReinitializedClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.SubstrateResourceBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.RuntimeReinitializedClassBuildItem;
+import io.quarkus.deployment.pkg.NativeConfig;
 import io.quarkus.kafka.streams.runtime.HotReplacementInterceptor;
 import io.quarkus.kafka.streams.runtime.KafkaStreamsRecorder;
 import io.quarkus.kafka.streams.runtime.KafkaStreamsRuntimeConfig;
 import io.quarkus.kafka.streams.runtime.KafkaStreamsTopologyManager;
 import io.quarkus.runtime.LaunchMode;
+import io.quarkus.smallrye.health.deployment.spi.HealthBuildItem;
 
 class KafkaStreamsProcessor {
 
@@ -41,16 +42,15 @@ class KafkaStreamsProcessor {
     void build(BuildProducer<FeatureBuildItem> feature,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClasses,
             BuildProducer<RuntimeReinitializedClassBuildItem> reinitialized,
-            BuildProducer<SubstrateResourceBuildItem> nativeLibs,
-            BuildProducer<JniBuildItem> jni,
-            LaunchModeBuildItem launchMode) throws IOException {
+            BuildProducer<NativeImageResourceBuildItem> nativeLibs,
+            LaunchModeBuildItem launchMode,
+            NativeConfig config) throws IOException {
 
         feature.produce(new FeatureBuildItem(FeatureBuildItem.KAFKA_STREAMS));
 
         registerClassesThatAreLoadedThroughReflection(reflectiveClasses, launchMode);
-        addSupportForRocksDbLib(nativeLibs);
+        addSupportForRocksDbLib(nativeLibs, config);
         enableLoadOfNativeLibs(reinitialized);
-        enableJniForNativeBuild(jni);
     }
 
     private void registerClassesThatAreLoadedThroughReflection(BuildProducer<ReflectiveClassBuildItem> reflectiveClasses,
@@ -105,23 +105,19 @@ class KafkaStreamsProcessor {
         }
     }
 
-    private void addSupportForRocksDbLib(BuildProducer<SubstrateResourceBuildItem> nativeLibs) {
+    private void addSupportForRocksDbLib(BuildProducer<NativeImageResourceBuildItem> nativeLibs, NativeConfig nativeConfig) {
         // for RocksDB, either add linux64 native lib when targeting containers
-        if (isContainerBuild()) {
-            nativeLibs.produce(new SubstrateResourceBuildItem("librocksdbjni-linux64.so"));
+        if (nativeConfig.containerRuntime.isPresent() || nativeConfig.containerBuild) {
+            nativeLibs.produce(new NativeImageResourceBuildItem("librocksdbjni-linux64.so"));
         }
         // otherwise the native lib of the platform this build runs on
         else {
-            nativeLibs.produce(new SubstrateResourceBuildItem(Environment.getJniLibraryFileName("rocksdb")));
+            nativeLibs.produce(new NativeImageResourceBuildItem(Environment.getJniLibraryFileName("rocksdb")));
         }
     }
 
     private void enableLoadOfNativeLibs(BuildProducer<RuntimeReinitializedClassBuildItem> reinitialized) {
         reinitialized.produce(new RuntimeReinitializedClassBuildItem("org.rocksdb.RocksDB"));
-    }
-
-    private void enableJniForNativeBuild(BuildProducer<JniBuildItem> jni) {
-        jni.produce(new JniBuildItem());
     }
 
     private void registerClassName(BuildProducer<ReflectiveClassBuildItem> reflectiveClasses, String defaultKeySerdeClass) {
@@ -195,21 +191,15 @@ class KafkaStreamsProcessor {
         return AdditionalBeanBuildItem.unremovableOf(KafkaStreamsTopologyManager.class);
     }
 
-    private boolean isContainerBuild() {
-        String containerRuntime = System.getProperty("native-image.container-runtime");
-
-        if (containerRuntime != null) {
-            containerRuntime = containerRuntime.trim().toLowerCase();
-            return containerRuntime.equals("docker") || containerRuntime.equals("podman");
-        }
-
-        String dockerBuild = System.getProperty("native-image.docker-build");
-
-        if (dockerBuild != null) {
-            dockerBuild = dockerBuild.trim().toLowerCase();
-            return !"false".equals(dockerBuild);
-        }
-
-        return false;
+    @BuildStep
+    void addHealthChecks(KafkaStreamsBuildTimeConfig buildTimeConfig, BuildProducer<HealthBuildItem> healthChecks) {
+        healthChecks.produce(
+                new HealthBuildItem(
+                        "io.quarkus.kafka.streams.runtime.health.KafkaStreamsTopicsHealthCheck",
+                        buildTimeConfig.healthEnabled, "kafka-streams"));
+        healthChecks.produce(
+                new HealthBuildItem(
+                        "io.quarkus.kafka.streams.runtime.health.KafkaStreamsStateHealthCheck",
+                        buildTimeConfig.healthEnabled, "kafka-streams"));
     }
 }

@@ -6,9 +6,11 @@ import static java.util.stream.Collectors.toList;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -25,8 +27,9 @@ import java.util.stream.Stream;
 
 import org.jboss.logging.Logger;
 
-import io.quarkus.deployment.devmode.HotReplacementContext;
-import io.quarkus.deployment.devmode.HotReplacementSetup;
+import io.quarkus.deployment.util.FileUtil;
+import io.quarkus.dev.spi.HotReplacementContext;
+import io.quarkus.dev.spi.HotReplacementSetup;
 import io.quarkus.runtime.Timing;
 
 public class RuntimeUpdatesProcessor implements HotReplacementContext {
@@ -55,15 +58,16 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
 
     /**
      * Resources that appear in both src and target, these will be removed if the src resource subsequently disappears.
-     * This set contains the paths in the target dir
+     * This map contains the paths in the target dir, one for each module, otherwise on a second module we will delete files
+     * from the first one
      */
-    private final Set<Path> correspondingResources = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Map<String, Set<Path>> correspondingResources = new ConcurrentHashMap<>();
     private final List<Runnable> preScanSteps = new CopyOnWriteArrayList<>();
     private final List<Consumer<Set<String>>> noRestartChangesConsumers = new CopyOnWriteArrayList<>();
     private final List<HotReplacementSetup> hotReplacementSetup = new ArrayList<>();
-    private final DevModeMain devModeMain;
+    private final IsolatedDevModeMain devModeMain;
 
-    public RuntimeUpdatesProcessor(DevModeContext context, ClassLoaderCompiler compiler, DevModeMain devModeMain) {
+    public RuntimeUpdatesProcessor(DevModeContext context, ClassLoaderCompiler compiler, IsolatedDevModeMain devModeMain) {
         this.context = context;
         this.compiler = compiler;
         this.devModeMain = devModeMain;
@@ -98,7 +102,8 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
     @Override
     public Throwable getDeploymentProblem() {
         //we differentiate between these internally, however for the error reporting they are the same
-        return DevModeMain.compileProblem != null ? DevModeMain.compileProblem : DevModeMain.deploymentProblem;
+        return IsolatedDevModeMain.compileProblem != null ? IsolatedDevModeMain.compileProblem
+                : IsolatedDevModeMain.deploymentProblem;
     }
 
     @Override
@@ -125,7 +130,7 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
         //in an ideal world we would just check every resource file for changes, however as everything is already
         //all broken we just assume the reason that they have refreshed is because they have fixed something
         //trying to watch all resource files is complex and this is likely a good enough solution for what is already an edge case
-        boolean restartNeeded = classChanged || (DevModeMain.deploymentProblem != null && userInitiated);
+        boolean restartNeeded = classChanged || (IsolatedDevModeMain.deploymentProblem != null && userInitiated);
         if (!restartNeeded && !filesChanged.isEmpty()) {
             restartNeeded = filesChanged.stream().map(watchedFilePaths::get).anyMatch(Boolean.TRUE::equals);
         }
@@ -166,7 +171,11 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
 
             for (String sourcePath : module.getSourcePaths()) {
                 final Set<File> changedSourceFiles;
-                try (final Stream<Path> sourcesStream = Files.walk(Paths.get(sourcePath))) {
+                Path start = Paths.get(sourcePath);
+                if (!Files.exists(start)) {
+                    continue;
+                }
+                try (final Stream<Path> sourcesStream = Files.walk(start)) {
                     changedSourceFiles = sourcesStream
                             .parallel()
                             .filter(p -> matchingHandledExtension(p).isPresent()
@@ -184,9 +193,9 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                         moduleChangedSourceFilePaths.addAll(changedPaths);
                         compiler.compile(sourcePath, changedSourceFiles.stream()
                                 .collect(groupingBy(this::getFileExtension, Collectors.toSet())));
-                        DevModeMain.compileProblem = null;
+                        IsolatedDevModeMain.compileProblem = null;
                     } catch (Exception e) {
-                        DevModeMain.compileProblem = e;
+                        IsolatedDevModeMain.compileProblem = e;
                         return false;
                     }
                 }
@@ -213,6 +222,9 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
         try {
             for (String folder : module.getClassesPath().split(File.pathSeparator)) {
                 final Path moduleClassesPath = Paths.get(folder);
+                if (!Files.exists(moduleClassesPath)) {
+                    continue;
+                }
                 try (final Stream<Path> classesStream = Files.walk(moduleClassesPath)) {
                     final Set<Path> classFilePaths = classesStream
                             .parallel()
@@ -248,7 +260,7 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                 }
             }
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException(e);
         }
 
         return hasChanges;
@@ -282,9 +294,11 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
         return name.substring(lastIndexOf);
     }
 
-    private Set<String> checkForFileChange() {
+    Set<String> checkForFileChange() {
         Set<String> ret = new HashSet<>();
         for (DevModeContext.ModuleInfo module : context.getModules()) {
+            final Set<Path> moduleResources = correspondingResources.computeIfAbsent(module.getName(),
+                    m -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
             boolean doCopy = true;
             String rootPath = module.getResourcePath();
             if (rootPath == null) {
@@ -295,20 +309,23 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                 continue;
             }
             Path root = Paths.get(rootPath);
+            if (!Files.exists(root) || !Files.isReadable(root)) {
+                continue;
+            }
             Path classesDir = Paths.get(module.getClassesPath());
             //copy all modified non hot deployment files over
             if (doCopy) {
                 try {
-                    Set<Path> seen = new HashSet<>(correspondingResources);
-                    Files.walk(root).forEach(new Consumer<Path>() {
-                        @Override
-                        public void accept(Path path) {
+                    final Set<Path> seen = new HashSet<>(moduleResources);
+                    //since the stream is Closeable, use a try with resources so the underlying iterator is closed
+                    try (final Stream<Path> walk = Files.walk(root)) {
+                        walk.forEach(path -> {
                             try {
                                 Path relative = root.relativize(path);
                                 Path target = classesDir.resolve(relative);
                                 seen.remove(target);
                                 if (!watchedFileTimestamps.containsKey(path)) {
-                                    correspondingResources.add(target);
+                                    moduleResources.add(target);
                                     if (!Files.exists(target) || Files.getLastModifiedTime(target).toMillis() < Files
                                             .getLastModifiedTime(path).toMillis()) {
                                         if (Files.isDirectory(path)) {
@@ -325,9 +342,10 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                             } catch (Exception e) {
                                 log.error("Failed to copy resources", e);
                             }
-                        }
-                    });
+                        });
+                    }
                     for (Path i : seen) {
+                        moduleResources.remove(i);
                         if (!Files.isDirectory(i)) {
                             Files.delete(i);
                         }
@@ -335,7 +353,6 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                 } catch (IOException e) {
                     log.error("Failed to copy resources", e);
                 }
-
             }
 
             for (String path : watchedFilePaths.keySet()) {
@@ -347,7 +364,7 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                         if (value > existing) {
                             ret.add(path);
                             log.infof("File change detected: %s", file);
-                            if (doCopy) {
+                            if (doCopy && !Files.isDirectory(file)) {
                                 Path target = classesDir.resolve(path);
                                 byte[] data = Files.readAllBytes(file);
                                 try (FileOutputStream out = new FileOutputStream(target.toFile())) {
@@ -357,15 +374,15 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                             watchedFileTimestamps.put(file, value);
                         }
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new UncheckedIOException(e);
                     }
                 } else {
                     watchedFileTimestamps.put(file, 0L);
                     Path target = classesDir.resolve(path);
                     try {
-                        Files.deleteIfExists(target);
+                        FileUtil.deleteDirectory(target);
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new UncheckedIOException(e);
                     }
                 }
             }
@@ -399,7 +416,7 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
 
             return false;
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -421,9 +438,10 @@ public class RuntimeUpdatesProcessor implements HotReplacementContext {
                 Path config = root.resolve(path);
                 if (config.toFile().exists()) {
                     try {
-                        watchedFileTimestamps.put(config, Files.getLastModifiedTime(config).toMillis());
+                        FileTime lastModifiedTime = Files.getLastModifiedTime(config);
+                        watchedFileTimestamps.put(config, lastModifiedTime.toMillis());
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new UncheckedIOException(e);
                     }
                 } else {
                     watchedFileTimestamps.put(config, 0L);

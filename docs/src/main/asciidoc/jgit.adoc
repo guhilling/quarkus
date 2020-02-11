@@ -18,7 +18,7 @@ to your project by running the following command in your project base directory.
 
 [source,bash]
 ----
-mvn quarkus:add-extension -Dextensions="jgit"
+./mvnw quarkus:add-extension -Dextensions="jgit"
 ----
 
 This will add the following to your pom.xml:
@@ -47,11 +47,10 @@ Here is an example using it in a JAX-RS endpoint:
             return tmpDir.toString();
         }
     }
-
 ----
 
 
 [WARNING]
 ====
-When running in native mode, make sure that the link:native-and-ssl-guide.html#the-sunec-library-and-friends[SSL access is configured correctly].
+When running in native mode, make sure that the link:native-and-ssl#the-sunec-library-and-friends[SSL access is configured correctly].
 ====

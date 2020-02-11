@@ -1,8 +1,5 @@
 package io.quarkus.gradle.tasks;
 
-import java.io.File;
-import java.io.IOException;
-
 import org.gradle.api.GradleException;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Optional;
@@ -10,21 +7,18 @@ import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.options.Option;
 
 import io.quarkus.cli.commands.ListExtensions;
+import io.quarkus.cli.commands.QuarkusCommandInvocation;
 import io.quarkus.cli.commands.writer.FileProjectWriter;
-import io.quarkus.generators.BuildTool;
+import io.quarkus.gradle.GradleBuildFileFromConnector;
 
-/**
- * @author <a href="mailto:stalep@gmail.com">Ståle Pedersen</a>
- */
-public class QuarkusListExtensions extends QuarkusTask {
+public class QuarkusListExtensions extends QuarkusPlatformTask {
 
     private boolean all = true;
 
     private String format = "concise";
 
-    private String searchPattern = null;
+    private String searchPattern;
 
-    @Optional
     @Input
     public boolean isAll() {
         return all;
@@ -63,12 +57,19 @@ public class QuarkusListExtensions extends QuarkusTask {
 
     @TaskAction
     public void listExtensions() {
+        execute();
+    }
+
+    @Override
+    protected void doExecute(QuarkusCommandInvocation invocation) {
+        invocation.setValue(ListExtensions.ALL, isAll())
+                .setValue(ListExtensions.FORMAT, getFormat())
+                .setValue(ListExtensions.SEARCH, getSearchPattern());
         try {
-            new ListExtensions(new FileProjectWriter(new File(getPath())), BuildTool.GRADLE).listExtensions(isAll(),
-                    getFormat(), getSearchPattern());
-        } catch (IOException e) {
+            new ListExtensions(new GradleBuildFileFromConnector(new FileProjectWriter(getProject().getProjectDir())))
+                    .execute(invocation);
+        } catch (Exception e) {
             throw new GradleException("Unable to list extensions", e);
         }
     }
-
 }

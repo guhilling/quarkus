@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 import java.util.Optional;
 
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.Plugin;
 import org.apache.maven.model.Resource;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -17,15 +18,17 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.toolchain.ToolchainManager;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
 
 import io.quarkus.maven.components.MavenVersionEnforcer;
 import io.quarkus.maven.utilities.MojoUtils;
 import io.quarkus.remotedev.AgentRunner;
+import io.quarkus.runtime.configuration.ConfigUtils;
+import io.quarkus.runtime.configuration.QuarkusConfigFactory;
 import io.smallrye.config.PropertiesConfigSource;
-import io.smallrye.config.SmallRyeConfigProviderResolver;
+import io.smallrye.config.SmallRyeConfig;
 
 /**
  * The dev mojo, that connects to a remote host.
@@ -45,35 +48,18 @@ public class RemoteDevMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.build.sourceDirectory}")
     private File sourceDir;
 
-    @Parameter(defaultValue = "${jvm.args}")
-    private String jvmArgs;
-
     @Parameter(defaultValue = "${session}")
     private MavenSession session;
-
-    @Parameter(defaultValue = "TRUE")
-    private boolean deleteDevJar;
 
     @Component
     private MavenVersionEnforcer mavenVersionEnforcer;
 
-    @Component
-    private ToolchainManager toolchainManager;
-
-    public ToolchainManager getToolchainManager() {
-        return toolchainManager;
-    }
-
-    public MavenSession getSession() {
-        return session;
-    }
-
     @Override
     public void execute() throws MojoFailureException, MojoExecutionException {
         mavenVersionEnforcer.ensureMavenVersion(getLog(), session);
-        boolean found = MojoUtils.checkProjectForMavenBuildPlugin(project);
+        Plugin found = MojoUtils.checkProjectForMavenBuildPlugin(project);
 
-        if (!found) {
+        if (found == null) {
             getLog().warn("The quarkus-maven-plugin build goal was not configured for this project, " +
                     "skipping quarkus:remote-dev as this is assumed to be a support library. If you want to run Quarkus remote-dev"
                     +
@@ -101,13 +87,15 @@ public class RemoteDevMojo extends AbstractMojo {
             Path config = Paths.get(resources).resolve("application.properties");
             if (Files.exists(config)) {
                 try {
-                    Config built = SmallRyeConfigProviderResolver.instance().getBuilder()
-                            .addDefaultSources()
-                            .addDiscoveredConverters()
-                            .addDiscoveredSources()
+                    SmallRyeConfig built = ConfigUtils.configBuilder(false)
                             .withSources(new PropertiesConfigSource(config.toUri().toURL())).build();
-                    SmallRyeConfigProviderResolver.instance().registerConfig(built,
-                            Thread.currentThread().getContextClassLoader());
+                    QuarkusConfigFactory.setConfig(built);
+                    final ConfigProviderResolver cpr = ConfigProviderResolver.instance();
+                    final Config existing = cpr.getConfig();
+                    if (existing != built) {
+                        cpr.releaseConfig(existing);
+                        // subsequent calls will get the new config
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }

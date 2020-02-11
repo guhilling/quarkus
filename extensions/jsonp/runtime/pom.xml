@@ -12,7 +12,7 @@
 
     <artifactId>quarkus-jsonp</artifactId>
     <name>Quarkus - JSON-P - Runtime</name>
-
+    <description>JSON Processing support</description>
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>org.glassfish</groupId>
-            <artifactId>javax.json</artifactId>
+            <artifactId>jakarta.json</artifactId>
         </dependency>
     </dependencies>
 
@@ -29,6 +29,12 @@
             <plugin>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bootstrap-maven-plugin</artifactId>
+                <configuration>
+                    <excludedArtifacts>
+                        <excludedArtifact>javax.json:javax.json-api</excludedArtifact>
+                        <excludedArtifact>org.glassfish:javax.json</excludedArtifact>
+                    </excludedArtifacts>
+                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>

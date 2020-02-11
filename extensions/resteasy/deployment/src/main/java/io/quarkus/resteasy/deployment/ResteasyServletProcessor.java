@@ -11,6 +11,7 @@ import javax.servlet.DispatcherType;
 import javax.ws.rs.core.Application;
 
 import org.jboss.logging.Logger;
+import org.jboss.metadata.web.spec.ServletMappingMetaData;
 import org.jboss.resteasy.microprofile.config.FilterConfigSourceImpl;
 import org.jboss.resteasy.microprofile.config.ServletConfigSourceImpl;
 import org.jboss.resteasy.microprofile.config.ServletContextConfigSourceImpl;
@@ -22,14 +23,18 @@ import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.resteasy.common.deployment.ResteasyInjectionReadyBuildItem;
 import io.quarkus.resteasy.runtime.ExceptionMapperRecorder;
 import io.quarkus.resteasy.runtime.ResteasyFilter;
-import io.quarkus.resteasy.server.common.deployment.ResteasyInjectionReadyBuildItem;
 import io.quarkus.resteasy.server.common.deployment.ResteasyServerConfigBuildItem;
+import io.quarkus.resteasy.server.common.deployment.ResteasyServletMappingBuildItem;
 import io.quarkus.undertow.deployment.FilterBuildItem;
 import io.quarkus.undertow.deployment.ServletBuildItem;
+import io.quarkus.undertow.deployment.ServletContextPathBuildItem;
 import io.quarkus.undertow.deployment.ServletInitParamBuildItem;
+import io.quarkus.undertow.deployment.WebMetadataBuildItem;
+import io.quarkus.vertx.http.deployment.HttpRootPathBuildItem;
 
 /**
  * Processor that finds JAX-RS classes in the deployment
@@ -43,10 +48,28 @@ public class ResteasyServletProcessor {
 
     @BuildStep
     public void jaxrsConfig(Optional<ResteasyServerConfigBuildItem> resteasyServerConfig,
-            BuildProducer<ResteasyJaxrsConfigBuildItem> resteasyJaxrsConfig) {
+            BuildProducer<ResteasyJaxrsConfigBuildItem> resteasyJaxrsConfig, HttpRootPathBuildItem httpRootPathBuildItem) {
         if (resteasyServerConfig.isPresent()) {
-            resteasyJaxrsConfig.produce(new ResteasyJaxrsConfigBuildItem(resteasyServerConfig.get().getPath()));
+            resteasyJaxrsConfig.produce(
+                    new ResteasyJaxrsConfigBuildItem(httpRootPathBuildItem.adjustPath(resteasyServerConfig.get().getPath())));
         }
+    }
+
+    @BuildStep
+    public ResteasyServletMappingBuildItem webXmlMapping(Optional<WebMetadataBuildItem> webMetadataBuildItem) {
+        if (webMetadataBuildItem.isPresent()) {
+            List<ServletMappingMetaData> servletMappings = webMetadataBuildItem.get().getWebMetaData().getServletMappings();
+            if (servletMappings != null) {
+                for (ServletMappingMetaData mapping : servletMappings) {
+                    if (JAVAX_WS_RS_APPLICATION.equals(mapping.getServletName())) {
+                        if (!mapping.getUrlPatterns().isEmpty()) {
+                            return new ResteasyServletMappingBuildItem(mapping.getUrlPatterns().iterator().next());
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     @BuildStep
@@ -58,11 +81,9 @@ public class ResteasyServletProcessor {
             BuildProducer<ServletBuildItem> servlet,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<ServletInitParamBuildItem> servletInitParameters,
+            Optional<ServletContextPathBuildItem> servletContextPathBuildItem,
             ResteasyInjectionReadyBuildItem resteasyInjectionReady) throws Exception {
         if (!capabilities.isCapabilityPresent(Capabilities.SERVLET)) {
-            // todo remove this info message after this is in the wild a few releases
-            log.info("Resteasy running without servlet container.");
-            log.info("- Add quarkus-undertow to run Resteasy within a servlet container");
             return;
         }
         feature.produce(new FeatureBuildItem(FeatureBuildItem.RESTEASY));
@@ -88,7 +109,8 @@ public class ResteasyServletProcessor {
             }
 
             for (Entry<String, String> initParameter : resteasyServerConfig.get().getInitParameters().entrySet()) {
-                servletInitParameters.produce(new ServletInitParamBuildItem(initParameter.getKey(), initParameter.getValue()));
+                servletInitParameters
+                        .produce(new ServletInitParamBuildItem(initParameter.getKey(), initParameter.getValue()));
             }
         }
     }
@@ -102,6 +124,9 @@ public class ResteasyServletProcessor {
 
     private String getMappingPath(String path) {
         String mappingPath;
+        if (path.endsWith("/*")) {
+            return path;
+        }
         if (path.endsWith("/")) {
             mappingPath = path + "*";
         } else {

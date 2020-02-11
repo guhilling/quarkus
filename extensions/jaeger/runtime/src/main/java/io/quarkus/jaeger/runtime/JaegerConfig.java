@@ -17,12 +17,6 @@ import io.quarkus.runtime.annotations.ConfigRoot;
 public class JaegerConfig {
 
     /**
-     * Defines if the Jaeger extension is enabled.
-     */
-    @ConfigItem(defaultValue = "true")
-    public boolean enabled;
-
-    /**
      * The traces endpoint, in case the client should connect directly to the Collector,
      * like http://jaeger-collector:14268/api/traces
      */
@@ -116,5 +110,11 @@ public class JaegerConfig {
      */
     @ConfigItem
     public Optional<String> senderFactory;
+
+    /**
+     * Whether the trace context should be logged.
+     */
+    @ConfigItem(defaultValue = "true")
+    public Boolean logTraceContext;
 
 }

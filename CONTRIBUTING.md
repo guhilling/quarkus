@@ -51,7 +51,7 @@ If you have not done so on this machine, you need to:
  
 * Install Git and configure your GitHub access
 * Install Java SDK (OpenJDK recommended)
-* Install [GraalVM](http://www.graalvm.org/downloads/) (community edition is enough)
+* Install [GraalVM](https://quarkus.io/guides/building-native-image)
 * Install platform C developer tools:
     * Linux
         * Make sure headers are available on your system (you'll hit 'Basic header file missing (<zlib.h>)' error if they aren't).
@@ -109,11 +109,39 @@ cd quarkus
 
 The default build does not create native images, which is quite time consuming.
 
+Note that the full build with all tests is quite slow, you will usually want to build with `-DskipTests`. This will also
+skip creation of the integration-test runner jars. If you want to skip tests but still create the runners you can set
+`-DskipTests -Dquarkus.build.skip=false`
+
 You can build and test native images in the integration tests supporting it by using `./mvnw install -Dnative`.
 
 By default the build will use the native image server. This speeds up the build, but can cause problems due to the cache
 not being invalidated correctly in some cases. To run a build with a new instance of the server you can use
 `./mvnw install -Dnative-image.new-server=true`.
+
+### MicroProfile TCK's
+
+Quarkus has a TCK module in `tcks` where all the MicroProfile TCK's are set up for you to run if you wish. These 
+includes tests to areas like Config, JWT Authentication, Fault Tolerance, Health Checks, Metrics, OpenAPI, OpenTracing, 
+REST Client, Reactive Messaging and Context Propagation.
+
+The TCK module is not part of the main Maven reactor build, but you can enable it and run the TCK tests by activating 
+the Maven Profile `-Ptcks`. If your work is related to any of these areas, running the TCK's is highly recommended to 
+make sure you are not breaking the project. The TCK's will also run on any Pull Request.
+
+You can either run all of the TCK's or just a subset by executing `mvn verify` in the `tcks` module root or each of 
+the submodules. If you wish to run a particular test, you can use Maven `-Dtest=` property with the fully qualified 
+name of the test class and optionally the method name by using 
+`mvn verify -Dtest=fully.qualified.test.class.name#methodName`.
+
+### Test Coverage
+
+Quarkus uses Jacoco to generate test coverage. If you would like to generate the report run `mvn install -Ptest-coverage`,
+then change into the `coverage-report` directory and run `mvn package`. The code coverage report will be generated in
+`target/site/jacoco/`.
+
+This currently does not work on Windows as it uses a shell script to copy all the classes and files into the code coverage
+module.
 
 ## The small print
 

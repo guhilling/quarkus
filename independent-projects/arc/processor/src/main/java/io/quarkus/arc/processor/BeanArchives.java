@@ -2,8 +2,8 @@ package io.quarkus.arc.processor;
 
 import static io.quarkus.arc.processor.IndexClassLookupUtils.getClassByNameNoLogging;
 
-import io.quarkus.arc.ActivateRequestContextInterceptor;
-import io.quarkus.arc.InjectableRequestContextController;
+import io.quarkus.arc.impl.ActivateRequestContextInterceptor;
+import io.quarkus.arc.impl.InjectableRequestContextController;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Modifier;
@@ -45,11 +45,11 @@ public final class BeanArchives {
      * @param applicationIndexes
      * @return the final bean archive index
      */
-    public static IndexView buildBeanArchiveIndex(IndexView... applicationIndexes) {
+    public static IndexView buildBeanArchiveIndex(ClassLoader deploymentClassLoader, IndexView... applicationIndexes) {
         List<IndexView> indexes = new ArrayList<>();
         Collections.addAll(indexes, applicationIndexes);
         indexes.add(buildAdditionalIndex());
-        return new IndexWrapper(CompositeIndex.create(indexes));
+        return new IndexWrapper(CompositeIndex.create(indexes), deploymentClassLoader);
     }
 
     private static IndexView buildAdditionalIndex() {
@@ -77,9 +77,11 @@ public final class BeanArchives {
         private final Map<DotName, Optional<ClassInfo>> additionalClasses;
 
         private final IndexView index;
+        private final ClassLoader deploymentClassLoader;
 
-        public IndexWrapper(IndexView index) {
+        public IndexWrapper(IndexView index, ClassLoader deploymentClassLoader) {
             this.index = index;
+            this.deploymentClassLoader = deploymentClassLoader;
             this.additionalClasses = new ConcurrentHashMap<>();
         }
 
@@ -226,7 +228,7 @@ public final class BeanArchives {
         private Optional<ClassInfo> computeAdditional(DotName className) {
             LOGGER.debugf("Index: %s", className);
             Indexer indexer = new Indexer();
-            if (BeanArchives.index(indexer, className.toString())) {
+            if (BeanArchives.index(indexer, className.toString(), deploymentClassLoader)) {
                 Index index = indexer.complete();
                 return Optional.of(index.getClassByName(className));
             } else {
@@ -238,7 +240,11 @@ public final class BeanArchives {
     }
 
     static boolean index(Indexer indexer, String className) {
-        try (InputStream stream = BeanProcessor.class.getClassLoader()
+        return index(indexer, className, BeanArchives.class.getClassLoader());
+    }
+
+    static boolean index(Indexer indexer, String className, ClassLoader classLoader) {
+        try (InputStream stream = classLoader
                 .getResourceAsStream(className.replace('.', '/') + ".class")) {
             indexer.index(stream);
             return true;

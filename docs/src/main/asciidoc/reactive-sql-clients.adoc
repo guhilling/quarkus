@@ -11,14 +11,14 @@ include::./attributes.adoc[]
 The Reactive SQL Clients have a straightforward API focusing on scalability and low-overhead.
 Currently, the following database servers are supported:
 
-* Postgres
+* PostgreSQL
 * MySQL
 
-In this guide, you will learn how to implement a simple CRUD application exposing data stored in *Postgres* over a RESTful API.
+In this guide, you will learn how to implement a simple CRUD application exposing data stored in *PostgreSQL* over a RESTful API.
 
 NOTE: Extension and connection pool class names for each client can be found at the bottom of this document.
 
-IMPORTANT: If you are not familiar with the Quarkus Vert.x extension, consider reading the link:using-vertx.html[Using Eclipse Vert.x] guide first.
+IMPORTANT: If you are not familiar with the Quarkus Vert.x extension, consider reading the link:vertx[Using Eclipse Vert.x] guide first.
 
 The application shall manage fruit entities:
 
@@ -46,7 +46,7 @@ public class Fruit {
 
 [TIP]
 ====
-Do you need a ready-to-use Postgres server to try out the examples?
+Do you need a ready-to-use PostgreSQL server to try out the examples?
 
 [source,shell]
 ----
@@ -56,7 +56,7 @@ docker run --ulimit memlock=-1:-1 -it --rm=true --memory-swappiness=0 --name qua
 
 == Installing
 
-=== Reactive Postgres Client extension
+=== Reactive PostgreSQL Client extension
 
 First, make sure your project has the `quarkus-reactive-pg-client` extension enabled.
 If you are creating a new project, set the `extensions` parameter as follows:
@@ -67,13 +67,14 @@ mvn io.quarkus:quarkus-maven-plugin:{quarkus-version}:create \
     -DprojectGroupId=org.acme \
     -DprojectArtifactId=reactive-pg-client-quickstart \
     -Dextensions="reactive-pg-client"
+cd reactive-pg-client-quickstart
 ----
 
 If you have an already created project, the `reactive-pg-client` extension can be added to an existing Quarkus project with the `add-extension` command:
 
 [source,shell]
 ----
-mvn quarkus:add-extension -Dextensions="reactive-pg-client"
+./mvnw quarkus:add-extension -Dextensions="reactive-pg-client"
 ----
 
 Otherwise, you can manually add this to the dependencies section of your `pom.xml` file:
@@ -86,8 +87,8 @@ Otherwise, you can manually add this to the dependencies section of your `pom.xm
 </dependency>
 ----
 
-NOTE: In this guide, we will use the Axle API of the Reactive Postgres Client.
-Read the link:using-vertx.html[Using Eclipse Vert.x] guide to understand the differences between the callback, RxJava and Axle based APIs.
+NOTE: In this guide, we will use the Axle API of the Reactive PostgreSQL Client.
+Read the link:vertx[Using Eclipse Vert.x] guide to understand the differences between the callback, RxJava and Axle based APIs.
 
 === JSON Binding
 
@@ -96,7 +97,7 @@ Consequently, you also need to add the `quarkus-resteasy-jsonb` extension:
 
 [source,shell]
 ----
-mvn quarkus:add-extension -Dextensions="resteasy-jsonb"
+./mvnw quarkus:add-extension -Dextensions="resteasy-jsonb"
 ----
 
 If you prefer not to use the command line, manually add this to the dependencies section of your `pom.xml` file:
@@ -109,11 +110,11 @@ If you prefer not to use the command line, manually add this to the dependencies
 </dependency>
 ----
 
-Of course, this is only a requirement for this guide, not any application using the Reactive Postgres Client.
+Of course, this is only a requirement for this guide, not any application using the Reactive PostgreSQL Client.
 
 == Configuring
 
-The Reactive Postgres Client can be configured with standard Quarkus datasource properties:
+The Reactive PostgreSQL Client can be configured with standard Quarkus datasource properties:
 
 [source]
 .src/main/resources/application.properties
@@ -124,7 +125,7 @@ quarkus.datasource.password=quarkus_test
 ----
 
 IMPORTANT: The eagle eyes among you might have noticed the `url` prefix is different from usual JDBC urls.
-It is required to use the `vertx-reactive:` prefix otherwise the Reactive Postgres Client extension will not use the `quarkus.datasource.url` config property.
+It is required to use the `vertx-reactive:` prefix otherwise the Reactive PostgreSQL Client extension will not use the `quarkus.datasource.url` config property.
 
 With that you may create your `FruitResource` skeleton and `@Inject` a `io.vertx.axle.pgclient.PgPool` instance:
 
@@ -146,7 +147,7 @@ public class FruitResource {
 Before we implement the REST endpoint and data management code, we need to setup the database schema.
 It would also be convenient to have some data inserted upfront.
 
-For production we would recommend to use something like the link:flyway-guide.html[Flyway database migration tool].
+For production we would recommend to use something like the link:flyway[Flyway database migration tool].
 But for development we can simply drop and create the tables on startup, and then insert a few fruits.
 
 [source,java]
@@ -264,7 +265,7 @@ Now start Quarkus in `dev` mode with:
 
 [source, shell]
 ----
-mvn compile quarkus:dev
+./mvnw compile quarkus:dev
 ----
 
 Lastly, open your browser and navigate to http://localhost:8080/fruits, you should see:
@@ -276,7 +277,7 @@ Lastly, open your browser and navigate to http://localhost:8080/fruits, you shou
 
 === Prepared queries
 
-The Reactive Postgres Client can also prepare queries and take parameters that are replaced in the SQL statement at execution time:
+The Reactive PostgreSQL Client can also prepare queries and take parameters that are replaced in the SQL statement at execution time:
 
 [source,java]
 ----
@@ -383,7 +384,7 @@ We will use https://jquery.com/[jQuery] to simplify interactions with the backen
 <html>
 <head>
     <meta charset="utf-8"/>
-    <title>Reactive Postgres Client - Quarkus</title>
+    <title>Reactive PostgreSQL Client - Quarkus</title>
     <script src="https://code.jquery.com/jquery-3.3.1.min.js"
             integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
     <script type="application/javascript" src="fruits.js"></script>
@@ -464,7 +465,7 @@ Navigate to http://localhost:8080/fruits.html and read/create/delete some fruits
 |===
 |Database |Extension name |Pool class name
 
-|Postgres
+|PostgreSQL
 |`quarkus-reactive-pg-client`
 |`io.vertx.axle.pgclient.PgPool`
 
@@ -472,3 +473,13 @@ Navigate to http://localhost:8080/fruits.html and read/create/delete some fruits
 |`quarkus-reactive-mysql-client`
 |`io.vertx.axle.mysqlclient.MySQLPool`
 |===
+
+== Configuration Reference
+
+=== MySQL
+
+include::{generated-dir}/config/quarkus-reactive-mysql-client.adoc[opts=optional, leveloffset=+1]
+
+=== PostgreSQL
+
+include::{generated-dir}/config/quarkus-reactive-pg-client.adoc[opts=optional, leveloffset=+1]

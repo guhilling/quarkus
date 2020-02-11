@@ -12,7 +12,7 @@
 
     <artifactId>quarkus-test-maven</artifactId>
     <packaging>jar</packaging>
-    <name>Quarkus - Maven Integration Test Framework</name>
+    <name>Quarkus - Test Framework - Maven Integration</name>
 
     <dependencies>
         <dependency>
@@ -21,8 +21,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-maven-plugin</artifactId>
-            <version>${project.version}</version>
+            <artifactId>quarkus-platform-descriptor-resolver-json</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.maven.shared</groupId>

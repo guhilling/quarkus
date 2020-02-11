@@ -2,7 +2,9 @@ package io.quarkus.resteasy.common.deployment;
 
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import javax.ws.rs.ApplicationPath;
 import javax.ws.rs.Consumes;
@@ -42,9 +44,31 @@ public final class ResteasyDotNames {
             .createSimple(org.jboss.resteasy.annotations.jaxrs.HeaderParam.class.getName());
     public static final DotName RESTEASY_MATRIX_PARAM = DotName
             .createSimple(org.jboss.resteasy.annotations.jaxrs.MatrixParam.class.getName());
+    public static final DotName RESTEASY_SSE_ELEMENT_TYPE = DotName
+            .createSimple(org.jboss.resteasy.annotations.SseElementType.class.getName());
+
+    public static final IgnoreForReflectionPredicate IGNORE_FOR_REFLECTION_PREDICATE = new IgnoreForReflectionPredicate();
+
+    private static class IgnoreForReflectionPredicate implements Predicate<DotName> {
+
+        @Override
+        public boolean test(DotName name) {
+            return ResteasyDotNames.TYPES_IGNORED_FOR_REFLECTION.contains(name) ||
+                    isInIgnoredPackage(name.toString());
+        }
+
+        private boolean isInIgnoredPackage(String name) {
+            for (String containerPackageName : PACKAGES_IGNORED_FOR_REFLECTION) {
+                if (name.startsWith(containerPackageName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     // Types ignored for reflection used by the RESTEasy and SmallRye REST client extensions.
-    public static final Set<DotName> TYPES_IGNORED_FOR_REFLECTION = new HashSet<>(Arrays.asList(
+    private static final Set<DotName> TYPES_IGNORED_FOR_REFLECTION = new HashSet<>(Arrays.asList(
             // javax.json
             DotName.createSimple("javax.json.JsonObject"),
             DotName.createSimple("javax.json.JsonArray"),
@@ -52,6 +76,7 @@ public final class ResteasyDotNames {
             // JAX-RS
             DotName.createSimple("javax.ws.rs.core.Response"),
             DotName.createSimple("javax.ws.rs.container.AsyncResponse"),
+            DotName.createSimple("javax.ws.rs.core.StreamingOutput"),
 
             // RESTEasy
             DotName.createSimple("org.jboss.resteasy.plugins.providers.multipart.MultipartInput"),
@@ -63,4 +88,6 @@ public final class ResteasyDotNames {
             DotName.createSimple("io.vertx.core.json.JsonArray"),
             DotName.createSimple("io.vertx.core.json.JsonObject")));
 
+    private static final List<String> PACKAGES_IGNORED_FOR_REFLECTION = Arrays.asList("java.", "io.reactivex.",
+            "org.reactivestreams.");
 }

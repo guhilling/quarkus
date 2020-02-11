@@ -1,8 +1,8 @@
 package io.quarkus.it.mongodb.panache;
 
-import io.quarkus.test.junit.SubstrateTest;
+import io.quarkus.test.junit.NativeImageTest;
 
-@SubstrateTest
-class NativeBookResourceIT extends BookResourceTest {
+@NativeImageTest
+class NativeBookResourceIT extends MongodbPanacheResourceTest {
 
 }

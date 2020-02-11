@@ -5,10 +5,15 @@ import static org.hamcrest.Matchers.emptyString;
 import static org.hamcrest.Matchers.is;
 
 import java.io.ByteArrayOutputStream;
+import java.io.StringWriter;
 import java.util.zip.GZIPOutputStream;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.Marshaller;
 
 import org.junit.jupiter.api.Test;
 
+import io.quarkus.it.rest.TestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.parsing.Parser;
@@ -34,6 +39,11 @@ public class JaxRSTestCase {
     @Test
     public void testConfigInjectionOfMessage() {
         RestAssured.when().get("/test/config/message").then().body(is("A message"));
+    }
+
+    @Test
+    public void testConfigInjectionOfStringArray() {
+        RestAssured.when().get("/test/config/names").then().body(is("quarkus,redhat"));
     }
 
     @Test
@@ -76,6 +86,27 @@ public class JaxRSTestCase {
 
             RestAssured.when().get("/test/xml").then()
                     .body("xmlObject.value.text()", is("A Value"));
+        } finally {
+            RestAssured.reset();
+        }
+    }
+
+    @Test
+    public void testJaxbConsumption() throws Exception {
+        TestResource.XmlObject xmlObject = new TestResource.XmlObject();
+        xmlObject.setValue("test");
+
+        StringWriter writer = new StringWriter();
+        JAXBContext context = JAXBContext.newInstance(TestResource.XmlObject.class);
+        Marshaller m = context.createMarshaller();
+        m.marshal(xmlObject, writer);
+
+        try {
+            // in the native image case, the right parser is not chosen, despite the content-type being correct
+            RestAssured.defaultParser = Parser.XML;
+
+            RestAssured.given().contentType("application/xml").body(writer.toString()).when().post("/test/consumeXml").then()
+                    .body(is("test"));
         } finally {
             RestAssured.reset();
         }
@@ -210,5 +241,29 @@ public class JaxRSTestCase {
                 .body("Hello Quarkus")
                 .post("/test/max-body-size")
                 .then().statusCode(200);
+    }
+
+    @Test
+    public void testSSE() throws Exception {
+        RestAssured.when().get("/sse/stream")
+                .then()
+                .contentType("text/event-stream")
+                .body(containsString("0"),
+                        containsString("1"),
+                        containsString("2"));
+
+        RestAssured.when().get("/sse/stream-html")
+                .then()
+                .contentType("text/event-stream")
+                .body(containsString("<html><body>0</body></html>"),
+                        containsString("<html><body>1</body></html>"),
+                        containsString("<html><body>2</body></html>"));
+
+        RestAssured.when().get("/sse/stream-xml")
+                .then()
+                .contentType("text/event-stream")
+                .body(containsString("<settings><foo bar=\"0\"/></settings>"),
+                        containsString("<settings><foo bar=\"1\"/></settings>"),
+                        containsString("<settings><foo bar=\"2\"/></settings>"));
     }
 }

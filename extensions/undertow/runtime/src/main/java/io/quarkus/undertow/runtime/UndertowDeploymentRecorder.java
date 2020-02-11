@@ -29,7 +29,6 @@ import javax.servlet.ServletException;
 import org.jboss.logging.Logger;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.PooledByteBufAllocator;
 import io.quarkus.arc.InjectableContext;
 import io.quarkus.arc.ManagedContext;
 import io.quarkus.arc.runtime.BeanContainer;
@@ -38,6 +37,7 @@ import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 import io.quarkus.runtime.configuration.MemorySize;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import io.quarkus.vertx.http.runtime.HttpConfiguration;
 import io.undertow.httpcore.BufferAllocator;
 import io.undertow.httpcore.StatusCodes;
@@ -65,11 +65,16 @@ import io.undertow.servlet.api.InstanceFactory;
 import io.undertow.servlet.api.InstanceHandle;
 import io.undertow.servlet.api.ListenerInfo;
 import io.undertow.servlet.api.LoginConfig;
+import io.undertow.servlet.api.MimeMapping;
+import io.undertow.servlet.api.SecurityConstraint;
+import io.undertow.servlet.api.SecurityInfo;
 import io.undertow.servlet.api.ServletContainer;
 import io.undertow.servlet.api.ServletContainerInitializerInfo;
 import io.undertow.servlet.api.ServletInfo;
 import io.undertow.servlet.api.ServletSecurityInfo;
 import io.undertow.servlet.api.ThreadSetupHandler;
+import io.undertow.servlet.api.TransportGuaranteeType;
+import io.undertow.servlet.api.WebResourceCollection;
 import io.undertow.servlet.handlers.DefaultServlet;
 import io.undertow.servlet.handlers.ServletPathMatches;
 import io.undertow.servlet.handlers.ServletRequestContext;
@@ -78,6 +83,7 @@ import io.undertow.util.AttachmentKey;
 import io.undertow.util.ImmediateAuthenticationMechanismFactory;
 import io.undertow.vertx.VertxHttpExchange;
 import io.vertx.core.Handler;
+import io.vertx.core.net.impl.PartialPooledByteBufAllocator;
 import io.vertx.ext.web.RoutingContext;
 
 /**
@@ -132,12 +138,21 @@ public class UndertowDeploymentRecorder {
     }
 
     public RuntimeValue<DeploymentInfo> createDeployment(String name, Set<String> knownFile, Set<String> knownDirectories,
-            LaunchMode launchMode, ShutdownContext context, String contextPath) {
+            LaunchMode launchMode, ShutdownContext context, String contextPath, String httpRootPath) {
+        String realMountPoint;
+        if (contextPath.equals("/")) {
+            realMountPoint = httpRootPath;
+        } else if (httpRootPath.equals("/")) {
+            realMountPoint = contextPath;
+        } else {
+            realMountPoint = httpRootPath + contextPath;
+        }
+
         DeploymentInfo d = new DeploymentInfo();
         d.setSessionIdGenerator(new QuarkusSessionIdGenerator());
         d.setClassLoader(getClass().getClassLoader());
         d.setDeploymentName(name);
-        d.setContextPath(contextPath);
+        d.setContextPath(realMountPoint);
         d.setEagerFilterInit(true);
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         if (cl == null) {
@@ -193,6 +208,7 @@ public class UndertowDeploymentRecorder {
                 }
             }
         });
+
         return new RuntimeValue<>(d);
     }
 
@@ -229,7 +245,9 @@ public class UndertowDeploymentRecorder {
 
     public void addServletMapping(RuntimeValue<DeploymentInfo> info, String name, String mapping) throws Exception {
         ServletInfo sv = info.getValue().getServlets().get(name);
-        sv.addMapping(mapping);
+        if (sv != null) {
+            sv.addMapping(mapping);
+        }
     }
 
     public void setMultipartConfig(RuntimeValue<ServletInfo> sref, String location, long fileSize, long maxRequestSize,
@@ -295,8 +313,18 @@ public class UndertowDeploymentRecorder {
                                 factory.instanceFactory(listenerClass))));
     }
 
+    public void addMimeMapping(RuntimeValue<DeploymentInfo> info, String extension,
+            String mimeType) throws Exception {
+        info.getValue().addMimeMapping(new MimeMapping(extension, mimeType));
+    }
+
     public void addServletInitParameter(RuntimeValue<DeploymentInfo> info, String name, String value) {
         info.getValue().addInitParameter(name, value);
+    }
+
+    public void setupSecurity(DeploymentManager manager) {
+
+        CDI.current().select(ServletHttpSecurityPolicy.class).get().setDeployment(manager.getDeployment());
     }
 
     public Handler<RoutingContext> startUndertow(ShutdownContext shutdown, ExecutorService executorService,
@@ -333,7 +361,9 @@ public class UndertowDeploymentRecorder {
         return new Handler<RoutingContext>() {
             @Override
             public void handle(RoutingContext event) {
-                VertxHttpExchange exchange = new VertxHttpExchange(event.request(), allocator, executorService, event);
+                event.request().pause();
+                VertxHttpExchange exchange = new VertxHttpExchange(event.request(), allocator, executorService, event,
+                        event.getBody());
                 Optional<MemorySize> maxBodySize = httpConfiguration.limits.maxBodySize;
                 if (maxBodySize.isPresent()) {
                     exchange.setMaxEntitySize(maxBodySize.get().asLongValue());
@@ -429,6 +459,7 @@ public class UndertowDeploymentRecorder {
         return new ServletExtension() {
             @Override
             public void handleDeployment(DeploymentInfo deploymentInfo, ServletContext servletContext) {
+                CurrentVertxRequest currentVertxRequest = CDI.current().select(CurrentVertxRequest.class).get();
                 deploymentInfo.addThreadSetupAction(new ThreadSetupHandler() {
                     @Override
                     public <T, C> ThreadSetupHandler.Action<T, C> create(Action<T, C> action) {
@@ -447,6 +478,10 @@ public class UndertowDeploymentRecorder {
                                             .getAttachment(REQUEST_CONTEXT);
                                     try {
                                         requestContext.activate(existingRequestContext);
+
+                                        VertxHttpExchange delegate = (VertxHttpExchange) exchange.getDelegate();
+                                        RoutingContext rc = (RoutingContext) delegate.getContext();
+                                        currentVertxRequest.setCurrent(rc);
                                         return action.call(exchange, context);
                                     } finally {
                                         ServletRequestContext src = exchange
@@ -500,6 +535,27 @@ public class UndertowDeploymentRecorder {
 
     public void addContextParam(RuntimeValue<DeploymentInfo> deployment, String paramName, String paramValue) {
         deployment.getValue().addInitParameter(paramName, paramValue);
+    }
+
+    public void setDenyUncoveredHttpMethods(RuntimeValue<DeploymentInfo> deployment, boolean denyUncoveredHttpMethods) {
+        deployment.getValue().setDenyUncoveredHttpMethods(denyUncoveredHttpMethods);
+    }
+
+    public void addSecurityConstraint(RuntimeValue<DeploymentInfo> deployment, SecurityConstraint securityConstraint) {
+        deployment.getValue().addSecurityConstraint(securityConstraint);
+    }
+
+    public void addSecurityConstraint(RuntimeValue<DeploymentInfo> deployment, SecurityInfo.EmptyRoleSemantic emptyRoleSemantic,
+            TransportGuaranteeType transportGuaranteeType,
+            Set<String> rolesAllowed, Set<WebResourceCollection> webResourceCollections) {
+
+        SecurityConstraint securityConstraint = new SecurityConstraint()
+                .setEmptyRoleSemantic(emptyRoleSemantic)
+                .addRolesAllowed(rolesAllowed)
+                .setTransportGuaranteeType(transportGuaranteeType)
+                .addWebResourceCollections(webResourceCollections.toArray(new WebResourceCollection[0]));
+        deployment.getValue().addSecurityConstraint(securityConstraint);
+
     }
 
     /**
@@ -611,9 +667,9 @@ public class UndertowDeploymentRecorder {
         @Override
         public ByteBuf allocateBuffer(boolean direct) {
             if (direct) {
-                return PooledByteBufAllocator.DEFAULT.directBuffer(defaultBufferSize);
+                return PartialPooledByteBufAllocator.DEFAULT.directBuffer(defaultBufferSize);
             } else {
-                return PooledByteBufAllocator.DEFAULT.heapBuffer(defaultBufferSize);
+                return PartialPooledByteBufAllocator.DEFAULT.heapBuffer(defaultBufferSize);
             }
         }
 
@@ -625,9 +681,9 @@ public class UndertowDeploymentRecorder {
         @Override
         public ByteBuf allocateBuffer(boolean direct, int bufferSize) {
             if (direct) {
-                return PooledByteBufAllocator.DEFAULT.directBuffer(bufferSize);
+                return PartialPooledByteBufAllocator.DEFAULT.directBuffer(bufferSize);
             } else {
-                return PooledByteBufAllocator.DEFAULT.heapBuffer(bufferSize);
+                return PartialPooledByteBufAllocator.DEFAULT.heapBuffer(bufferSize);
             }
         }
 

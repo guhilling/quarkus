@@ -2,35 +2,46 @@ package io.quarkus.vertx.core.deployment;
 
 import java.util.function.Supplier;
 
+import org.jboss.jandex.ClassInfo;
+import org.jboss.jandex.DotName;
+
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanContainerBuildItem;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
+import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.IOThreadDetectorBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
+import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.SubstrateConfigBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageConfigBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.logging.LogCleanupFilterBuildItem;
 import io.quarkus.netty.deployment.EventLoopSupplierBuildItem;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.vertx.core.runtime.VertxCoreProducer;
 import io.quarkus.vertx.core.runtime.VertxCoreRecorder;
 import io.quarkus.vertx.core.runtime.VertxLogDelegateFactory;
 import io.quarkus.vertx.core.runtime.config.VertxConfiguration;
+import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Vertx;
+import io.vertx.core.spi.resolver.ResolverProvider;
 
 class VertxCoreProcessor {
 
     @BuildStep
-    SubstrateConfigBuildItem build(BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
+    NativeImageConfigBuildItem build(BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
         reflectiveClass.produce(new ReflectiveClassBuildItem(true, false, VertxLogDelegateFactory.class.getName()));
-        return SubstrateConfigBuildItem.builder()
-                .addNativeImageSystemProperty("vertx.disableDnsResolver", "true")
+        return NativeImageConfigBuildItem.builder()
+                .addRuntimeInitializedClass("io.vertx.core.net.impl.PartialPooledByteBufAllocator")
+                .addRuntimeInitializedClass("io.vertx.core.http.impl.VertxHttp2ClientUpgradeCodec")
+                .addRuntimeInitializedClass("io.vertx.core.eventbus.impl.clustered.ClusteredEventBus")
+
+                .addNativeImageSystemProperty(ResolverProvider.DISABLE_DNS_RESOLVER_PROP_NAME, "true")
                 .addNativeImageSystemProperty("vertx.logger-delegate-factory-class-name",
                         VertxLogDelegateFactory.class.getName())
-                .addRuntimeInitializedClass("io.vertx.core.http.impl.VertxHttp2ClientUpgradeCodec")
                 .build();
     }
 
@@ -45,6 +56,7 @@ class VertxCoreProcessor {
         return new EventLoopCountBuildItem(recorder.calculateEventLoopThreads(vertxConfiguration));
     }
 
+    @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
     EventLoopSupplierBuildItem eventLoop(VertxCoreRecorder recorder) {
         return new EventLoopSupplierBuildItem(recorder.mainSupplier(), recorder.bossSupplier());
@@ -59,7 +71,8 @@ class VertxCoreProcessor {
     @BuildStep
     @Record(value = ExecutionTime.RUNTIME_INIT)
     CoreVertxBuildItem build(VertxCoreRecorder recorder, BeanContainerBuildItem beanContainer,
-            LaunchModeBuildItem launchMode, ShutdownContextBuildItem shutdown, VertxConfiguration config) {
+            LaunchModeBuildItem launchMode, ShutdownContextBuildItem shutdown, VertxConfiguration config,
+            BuildProducer<ServiceStartBuildItem> serviceStartBuildItem) {
 
         Supplier<Vertx> vertx = recorder.configureVertx(beanContainer.getValue(), config,
                 launchMode.getLaunchMode(), shutdown);
@@ -74,5 +87,19 @@ class VertxCoreProcessor {
             LaunchModeBuildItem launchModeBuildItem) {
         RuntimeValue<Vertx> vertx = recorder.initializeWeb(config, context, launchModeBuildItem.getLaunchMode());
         return new InternalWebVertxBuildItem(vertx);
+    }
+
+    @BuildStep
+    LogCleanupFilterBuildItem filterNettyHostsFileParsingWarn() {
+        return new LogCleanupFilterBuildItem("io.netty.resolver.HostsFileParser", "Failed to load and parse hosts file");
+    }
+
+    @BuildStep
+    void registerVerticleClasses(CombinedIndexBuildItem indexBuildItem,
+            BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
+        for (ClassInfo ci : indexBuildItem.getIndex()
+                .getAllKnownSubclasses(DotName.createSimple(AbstractVerticle.class.getName()))) {
+            reflectiveClass.produce(new ReflectiveClassBuildItem(false, false, ci.toString()));
+        }
     }
 }

@@ -1,6 +1,5 @@
 package io.quarkus.resteasy.server.common.deployment;
 
-import static io.quarkus.deployment.annotations.ExecutionTime.STATIC_INIT;
 import static io.quarkus.runtime.annotations.ConfigPhase.BUILD_TIME;
 
 import java.lang.reflect.Modifier;
@@ -12,9 +11,9 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.jboss.jandex.AnnotationInstance;
@@ -45,7 +44,6 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.AnnotationsTransformerBuildItem;
 import io.quarkus.arc.deployment.AutoInjectAnnotationBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
-import io.quarkus.arc.deployment.BeanContainerBuildItem;
 import io.quarkus.arc.deployment.BeanDefiningAnnotationBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem.BeanClassNameExclusion;
@@ -55,22 +53,19 @@ import io.quarkus.arc.processor.DotNames;
 import io.quarkus.arc.processor.Transformation;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.BytecodeTransformerBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
-import io.quarkus.deployment.builditem.ProxyUnwrapperBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.ReflectiveHierarchyBuildItem;
-import io.quarkus.deployment.builditem.substrate.RuntimeInitializedClassBuildItem;
-import io.quarkus.deployment.builditem.substrate.SubstrateConfigBuildItem;
-import io.quarkus.deployment.builditem.substrate.SubstrateProxyDefinitionBuildItem;
-import io.quarkus.deployment.builditem.substrate.SubstrateResourceBuildItem;
-import io.quarkus.jaxb.deployment.JaxbEnabledBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageConfigBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageProxyDefinitionBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
+import io.quarkus.gizmo.Gizmo;
 import io.quarkus.resteasy.common.deployment.JaxrsProvidersToRegisterBuildItem;
 import io.quarkus.resteasy.common.deployment.ResteasyCommonProcessor.ResteasyCommonConfig;
 import io.quarkus.resteasy.common.deployment.ResteasyDotNames;
-import io.quarkus.resteasy.server.common.runtime.QuarkusInjectorFactory;
-import io.quarkus.resteasy.server.common.runtime.ResteasyServerCommonRecorder;
+import io.quarkus.resteasy.common.runtime.QuarkusInjectorFactory;
 import io.quarkus.resteasy.server.common.spi.AdditionalJaxRsResourceDefiningAnnotationBuildItem;
 import io.quarkus.resteasy.server.common.spi.AdditionalJaxRsResourceMethodAnnotationsBuildItem;
 import io.quarkus.resteasy.server.common.spi.AdditionalJaxRsResourceMethodParamAnnotations;
@@ -143,8 +138,8 @@ public class ResteasyServerCommonProcessor {
     }
 
     @BuildStep
-    SubstrateConfigBuildItem config() {
-        return SubstrateConfigBuildItem.builder()
+    NativeImageConfigBuildItem config() {
+        return NativeImageConfigBuildItem.builder()
                 .addResourceBundle("messages")
                 .build();
     }
@@ -153,8 +148,8 @@ public class ResteasyServerCommonProcessor {
     public void build(
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<ReflectiveHierarchyBuildItem> reflectiveHierarchy,
-            BuildProducer<SubstrateProxyDefinitionBuildItem> proxyDefinition,
-            BuildProducer<SubstrateResourceBuildItem> resource,
+            BuildProducer<NativeImageProxyDefinitionBuildItem> proxyDefinition,
+            BuildProducer<NativeImageResourceBuildItem> resource,
             BuildProducer<RuntimeInitializedClassBuildItem> runtimeClasses,
             BuildProducer<BytecodeTransformerBuildItem> transformers,
             BuildProducer<ResteasyServerConfigBuildItem> resteasyServerConfig,
@@ -165,12 +160,14 @@ public class ResteasyServerCommonProcessor {
             List<AdditionalJaxRsResourceDefiningAnnotationBuildItem> additionalJaxRsResourceDefiningAnnotations,
             List<AdditionalJaxRsResourceMethodAnnotationsBuildItem> additionalJaxRsResourceMethodAnnotations,
             List<AdditionalJaxRsResourceMethodParamAnnotations> additionalJaxRsResourceMethodParamAnnotations,
+            List<ResteasyDeploymentCustomizerBuildItem> deploymentCustomizers,
             JaxrsProvidersToRegisterBuildItem jaxrsProvidersToRegisterBuildItem,
             CombinedIndexBuildItem combinedIndexBuildItem,
-            BeanArchiveIndexBuildItem beanArchiveIndexBuildItem) throws Exception {
+            BeanArchiveIndexBuildItem beanArchiveIndexBuildItem,
+            Optional<ResteasyServletMappingBuildItem> resteasyServletMappingBuildItem) throws Exception {
         IndexView index = combinedIndexBuildItem.getIndex();
 
-        resource.produce(new SubstrateResourceBuildItem("META-INF/services/javax.ws.rs.client.ClientBuilder"));
+        resource.produce(new NativeImageResourceBuildItem("META-INF/services/javax.ws.rs.client.ClientBuilder"));
 
         Collection<AnnotationInstance> applicationPaths = index.getAnnotations(ResteasyDotNames.APPLICATION_PATH);
 
@@ -202,8 +199,18 @@ public class ResteasyServerCommonProcessor {
             path = applicationPath.value().asString();
             appClass = applicationPath.target().asClass().name().toString();
         } else {
-            path = resteasyConfig.path;
-            appClass = null;
+            if (resteasyServletMappingBuildItem.isPresent()) {
+                if (resteasyServletMappingBuildItem.get().getPath().endsWith("/*")) {
+                    path = resteasyServletMappingBuildItem.get().getPath().substring(0,
+                            resteasyServletMappingBuildItem.get().getPath().length() - 1);
+                } else {
+                    path = resteasyServletMappingBuildItem.get().getPath();
+                }
+                appClass = null;
+            } else {
+                path = resteasyConfig.path;
+                appClass = null;
+            }
         }
 
         Map<DotName, ClassInfo> scannedResources = new HashMap<>();
@@ -238,7 +245,7 @@ public class ResteasyServerCommonProcessor {
             }
         }
 
-        Set<DotName> subresources = findSubresources(index, scannedResources);
+        Set<DotName> subresources = findSubresources(beanArchiveIndexBuildItem.getIndex(), scannedResources);
         if (!subresources.isEmpty()) {
             for (DotName locator : subresources) {
                 reflectiveClass.produce(new ReflectiveClassBuildItem(true, true, locator.toString()));
@@ -253,9 +260,9 @@ public class ResteasyServerCommonProcessor {
         // see https://issues.jboss.org/browse/RESTEASY-2183
         generateDefaultConstructors(transformers, withoutDefaultCtor, additionalJaxRsResourceDefiningAnnotations);
 
-        checkParameterNames(index, additionalJaxRsResourceMethodParamAnnotations);
+        checkParameterNames(beanArchiveIndexBuildItem.getIndex(), additionalJaxRsResourceMethodParamAnnotations);
 
-        registerContextProxyDefinitions(index, proxyDefinition);
+        registerContextProxyDefinitions(beanArchiveIndexBuildItem.getIndex(), proxyDefinition);
 
         registerReflectionForSerialization(reflectiveClass, reflectiveHierarchy, combinedIndexBuildItem,
                 beanArchiveIndexBuildItem, additionalJaxRsResourceMethodAnnotations);
@@ -283,6 +290,11 @@ public class ResteasyServerCommonProcessor {
         }
         resteasyInitParameters.put("resteasy.injector.factory", QuarkusInjectorFactory.class.getName());
         deployment.setInjectorFactoryClass(QuarkusInjectorFactory.class.getName());
+
+        // apply all customizers
+        for (ResteasyDeploymentCustomizerBuildItem deploymentCustomizer : deploymentCustomizers) {
+            deploymentCustomizer.getConsumer().accept(deployment);
+        }
 
         if (commonConfig.gzip.enabled) {
             resteasyInitParameters.put(ResteasyContextParameters.RESTEASY_GZIP_MAX_INPUT,
@@ -390,20 +402,6 @@ public class ResteasyServerCommonProcessor {
         }
     }
 
-    @Record(STATIC_INIT)
-    @BuildStep
-    ResteasyInjectionReadyBuildItem setupInjection(ResteasyServerCommonRecorder recorder,
-            BeanContainerBuildItem beanContainerBuildItem,
-            List<ProxyUnwrapperBuildItem> proxyUnwrappers) {
-        List<Function<Object, Object>> unwrappers = new ArrayList<>();
-        for (ProxyUnwrapperBuildItem i : proxyUnwrappers) {
-            unwrappers.add(i.getUnwrapper());
-        }
-        recorder.setupIntegration(beanContainerBuildItem.getValue(), unwrappers);
-
-        return new ResteasyInjectionReadyBuildItem();
-    }
-
     @BuildStep
     void beanDefiningAnnotations(BuildProducer<BeanDefiningAnnotationBuildItem> beanDefiningAnnotations) {
         beanDefiningAnnotations
@@ -412,16 +410,6 @@ public class ResteasyServerCommonProcessor {
         beanDefiningAnnotations
                 .produce(new BeanDefiningAnnotationBuildItem(ResteasyDotNames.APPLICATION_PATH,
                         BuiltinScope.SINGLETON.getName()));
-    }
-
-    /**
-     * Indicates that JAXB support should be enabled
-     *
-     * @return
-     */
-    @BuildStep
-    JaxbEnabledBuildItem enableJaxb() {
-        return new JaxbEnabledBuildItem();
     }
 
     private boolean hasAutoInjectAnnotation(Set<DotName> autoInjectAnnotationNames, ClassInfo clazz) {
@@ -573,7 +561,7 @@ public class ResteasyServerCommonProcessor {
                     .produce(new BytecodeTransformerBuildItem(name, new BiFunction<String, ClassVisitor, ClassVisitor>() {
                         @Override
                         public ClassVisitor apply(String className, ClassVisitor classVisitor) {
-                            ClassVisitor cv = new ClassVisitor(Opcodes.ASM7, classVisitor) {
+                            ClassVisitor cv = new ClassVisitor(Gizmo.ASM_API_VERSION, classVisitor) {
 
                                 @Override
                                 public void visit(int version, int access, String name, String signature, String superName,
@@ -616,6 +604,10 @@ public class ResteasyServerCommonProcessor {
         OUTER: for (DotName annotationType : methodParameterAnnotations) {
             Collection<AnnotationInstance> instances = index.getAnnotations(annotationType);
             for (AnnotationInstance instance : instances) {
+                // we only care about method parameters, because properties or fields always work
+                if (instance.target().kind() != Kind.METHOD_PARAMETER) {
+                    continue;
+                }
                 MethodParameterInfo param = instance.target().asMethodParameter();
                 if (param.name() == null) {
                     log.warnv(
@@ -631,7 +623,7 @@ public class ResteasyServerCommonProcessor {
     }
 
     private static void registerContextProxyDefinitions(IndexView index,
-            BuildProducer<SubstrateProxyDefinitionBuildItem> proxyDefinition) {
+            BuildProducer<NativeImageProxyDefinitionBuildItem> proxyDefinition) {
         // @Context uses proxies for interface injection
         for (AnnotationInstance annotation : index.getAnnotations(ResteasyDotNames.CONTEXT)) {
             DotName typeName = null;
@@ -650,14 +642,14 @@ public class ResteasyServerCommonProcessor {
                 ClassInfo type = index.getClassByName(typeName);
                 if (type != null) {
                     if (Modifier.isInterface(type.flags())) {
-                        proxyDefinition.produce(new SubstrateProxyDefinitionBuildItem(type.toString()));
+                        proxyDefinition.produce(new NativeImageProxyDefinitionBuildItem(type.toString()));
                     }
                 } else {
                     //might be a framework class, which should be loadable
                     try {
                         Class<?> typeClass = Class.forName(typeName.toString());
                         if (typeClass.isInterface()) {
-                            proxyDefinition.produce(new SubstrateProxyDefinitionBuildItem(typeName.toString()));
+                            proxyDefinition.produce(new NativeImageProxyDefinitionBuildItem(typeName.toString()));
                         }
                     } catch (Exception e) {
                         //ignore
@@ -709,23 +701,17 @@ public class ResteasyServerCommonProcessor {
                 continue;
             }
             MethodInfo method = instance.target().asMethod();
-            if (isReflectionDeclarationRequiredFor(method.returnType())) {
-                reflectiveHierarchy.produce(new ReflectiveHierarchyBuildItem(method.returnType(), index));
-            }
+            reflectiveHierarchy.produce(new ReflectiveHierarchyBuildItem(method.returnType(), index,
+                    ResteasyDotNames.IGNORE_FOR_REFLECTION_PREDICATE));
+
             for (short i = 0; i < method.parameters().size(); i++) {
                 Type parameterType = method.parameters().get(i);
-                if (isReflectionDeclarationRequiredFor(parameterType)
-                        && !hasAnnotation(method, i, ResteasyDotNames.CONTEXT)) {
-                    reflectiveHierarchy.produce(new ReflectiveHierarchyBuildItem(parameterType, index));
+                if (!hasAnnotation(method, i, ResteasyDotNames.CONTEXT)) {
+                    reflectiveHierarchy.produce(new ReflectiveHierarchyBuildItem(parameterType, index,
+                            ResteasyDotNames.IGNORE_FOR_REFLECTION_PREDICATE));
                 }
             }
         }
-    }
-
-    private static boolean isReflectionDeclarationRequiredFor(Type type) {
-        DotName className = getClassName(type);
-
-        return className != null && !ResteasyDotNames.TYPES_IGNORED_FOR_REFLECTION.contains(className);
     }
 
     private static DotName getClassName(Type type) {

@@ -17,6 +17,10 @@
         <!-- Plumbing -->
         <module>arc</module>
         <module>scheduler</module>
+        <module>quartz</module>
+
+        <!-- Configuration -->
+        <module>config-yaml</module>
 
         <!-- Formats -->
         <module>jackson</module>
@@ -43,6 +47,8 @@
         <module>resteasy</module>
         <module>resteasy-jsonb</module>
         <module>resteasy-jackson</module>
+        <module>resteasy-jaxb</module>
+        <module>resteasy-qute</module>
         <module>rest-client</module>
         <module>smallrye-openapi-common</module>
         <module>smallrye-openapi</module>
@@ -64,6 +70,7 @@
 
         <!-- Data access and validation -->
         <module>narayana-jta</module>
+        <module>narayana-stm</module>
         <module>agroal</module>
         <module>jdbc</module>
         <module>hibernate-orm</module>
@@ -71,6 +78,7 @@
         <module>panache</module>
         <module>hibernate-search-elasticsearch</module>
         <module>elasticsearch-rest-client</module>
+        <module>jsch</module>
         <module>jgit</module>
         <module>kafka-client</module>
         <module>kafka-streams</module>
@@ -84,23 +92,31 @@
         <module>spring-di</module>
         <module>spring-web</module>
         <module>spring-data-jpa</module>
+        <module>spring-security</module>
+        <module>spring-boot-properties</module>
 
         <!-- Security -->
         <module>security</module>
+        <module>elytron-security-common</module>
         <module>elytron-security</module>
+        <module>elytron-security-jdbc</module>
+        <module>elytron-security-properties-file</module>
         <module>elytron-security-oauth2</module>
         <module>smallrye-jwt</module>
-        <module>vertx-keycloak</module>
+        <module>oidc</module>
+        <module>keycloak-authorization</module>
 
         <!-- Infinispan -->
         <module>infinispan-client</module>
+        <module>infinispan-embedded</module>
 
         <!-- Caching -->
         <module>caffeine</module>
+        <module>cache</module>
 
         <!-- Integrations -->
         <module>amazon-lambda</module>
-        <module>amazon-lambda-resteasy</module>
+        <module>amazon-lambda-http</module>
         <module>amazon-dynamodb</module>
         <module>azure-functions-http</module>
 
@@ -117,8 +133,24 @@
 
         <!-- kogito -->
         <module>kogito</module>
+
+        <!-- vault -->
+        <module>vault</module>
+        <module>vertx-graphql</module>
+
+        <!-- Logging -->
+        <module>logging-json</module>
+        <module>logging-sentry</module>
+        <module>logging-gelf</module>
+        
+        <!-- Templating -->
+        <module>qute</module>
     </modules>
 
+    <!-- Unfortunately the config below introduces a build dependency on the maven plugin
+         which leads to an ordering that prevents the tooling to include the generated
+         JSON platform descriptor.
+         Hopefully, this can be re-enabled once we refactor the tools.
     <build>
         <plugins>
             <plugin>
@@ -126,9 +158,9 @@
                 <artifactId>quarkus-maven-plugin</artifactId>
                 <version>${project.version}</version>
                 <inherited>false</inherited>
-                <!-- Settings for stubbing new extensions via
+                < ! - - Settings for stubbing new extensions via
                      mvn quarkus:create-extension -N -Dquarkus.artifactIdBase=my-ext -Dquarkus.nameBase="My Extension"
-                -->
+                - - >
                 <configuration>
                     <artifactIdPrefix>quarkus-</artifactIdPrefix>
                     <namePrefix xml:space="preserve">Quarkus - </namePrefix>
@@ -140,5 +172,5 @@
             </plugin>
         </plugins>
     </build>
-
+    -->
 </project>

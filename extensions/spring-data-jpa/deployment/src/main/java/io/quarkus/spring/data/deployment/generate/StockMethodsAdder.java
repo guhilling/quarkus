@@ -33,6 +33,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
 import io.quarkus.deployment.bean.JavaBeanUtil;
+import io.quarkus.gizmo.AssignableResultHandle;
 import io.quarkus.gizmo.BranchResult;
 import io.quarkus.gizmo.BytecodeCreator;
 import io.quarkus.gizmo.ClassCreator;
@@ -544,17 +545,44 @@ public class StockMethodsAdder {
                             "(Lorg/springframework/data/domain/Pageable;)Lorg/springframework/data/domain/Page<L%s;>;",
                             entityTypeStr.replace('.', '/')));
 
-                    ResultHandle page = findAll.invokeStaticMethod(
+                    ResultHandle pageable = findAll.getMethodParam(0);
+                    ResultHandle pageableSort = findAll.invokeInterfaceMethod(
+                            MethodDescriptor.ofMethod(Pageable.class, "getSort", Sort.class),
+                            pageable);
+
+                    ResultHandle panachePage = findAll.invokeStaticMethod(
                             MethodDescriptor.ofMethod(TypesConverter.class, "toPanachePage",
                                     io.quarkus.panache.common.Page.class, Pageable.class),
-                            findAll.getMethodParam(0));
-                    ResultHandle panacheQuery = findAll.invokeStaticMethod(
+                            pageable);
+                    ResultHandle panacheSort = findAll.invokeStaticMethod(
+                            MethodDescriptor.ofMethod(TypesConverter.class, "toPanacheSort",
+                                    io.quarkus.panache.common.Sort.class,
+                                    org.springframework.data.domain.Sort.class),
+                            pageableSort);
+
+                    // depending on whether there was a io.quarkus.panache.common.Sort returned, we need to execute a different findAll method
+                    BranchResult sortNullBranch = findAll.ifNull(panacheSort);
+                    BytecodeCreator sortNullTrue = sortNullBranch.trueBranch();
+                    BytecodeCreator sortNullFalse = sortNullBranch.falseBranch();
+                    AssignableResultHandle panacheQueryVar = findAll.createVariable(PanacheQuery.class);
+
+                    ResultHandle panacheQueryWithoutSort = sortNullTrue.invokeStaticMethod(
                             ofMethod(JpaOperations.class, "findAll", PanacheQuery.class, Class.class),
-                            findAll.readInstanceField(entityClassFieldDescriptor, findAll.getThis()));
-                    panacheQuery = findAll.invokeInterfaceMethod(
+                            sortNullTrue.readInstanceField(entityClassFieldDescriptor, sortNullTrue.getThis()));
+                    sortNullTrue.assign(panacheQueryVar, panacheQueryWithoutSort);
+                    sortNullTrue.breakScope();
+
+                    ResultHandle panacheQueryWithSort = sortNullFalse.invokeStaticMethod(
+                            ofMethod(JpaOperations.class, "findAll", PanacheQuery.class, Class.class,
+                                    io.quarkus.panache.common.Sort.class),
+                            sortNullFalse.readInstanceField(entityClassFieldDescriptor, sortNullFalse.getThis()), panacheSort);
+                    sortNullFalse.assign(panacheQueryVar, panacheQueryWithSort);
+                    sortNullFalse.breakScope();
+
+                    ResultHandle panacheQuery = findAll.invokeInterfaceMethod(
                             MethodDescriptor.ofMethod(PanacheQuery.class, "page", PanacheQuery.class,
                                     io.quarkus.panache.common.Page.class),
-                            panacheQuery, page);
+                            panacheQueryVar, panachePage);
                     ResultHandle list = findAll.invokeInterfaceMethod(
                             MethodDescriptor.ofMethod(PanacheQuery.class, "list", List.class),
                             panacheQuery);
@@ -690,7 +718,7 @@ public class StockMethodsAdder {
                     ResultHandle idToString = entityNull.invokeVirtualMethod(
                             ofMethod(Object.class, "toString", String.class),
                             id);
-                    ResultHandle formatArgsArray = entityNull.newArray(Object.class, entityNull.load(1));
+                    ResultHandle formatArgsArray = entityNull.newArray(Object.class, 1);
                     entityNull.writeArrayValue(formatArgsArray, entityNull.load(0), idToString);
 
                     ResultHandle messageFormat = entityNull.load("No entity " + entityTypeStr + " with id %s exists");
@@ -890,21 +918,28 @@ public class StockMethodsAdder {
     }
 
     private AnnotationTarget getIdAnnotationTarget(DotName entityDotName, IndexView index) {
-        ClassInfo entityClassInfo = index.getClassByName(entityDotName);
-        if (entityClassInfo == null) {
-            throw new IllegalStateException("Entity class " + entityClassInfo + " was not part of the Quarkus index");
+        return getIdAnnotationTargetRec(entityDotName, index, entityDotName);
+    }
+
+    private AnnotationTarget getIdAnnotationTargetRec(DotName currentDotName, IndexView index, DotName originalEntityDotName) {
+        ClassInfo classInfo = index.getClassByName(currentDotName);
+        if (classInfo == null) {
+            throw new IllegalStateException("Entity " + originalEntityDotName + " was not part of the Quarkus index");
         }
 
-        if (!entityClassInfo.annotations().containsKey(DotNames.JPA_ID)) {
-            throw new IllegalArgumentException("Currently only Entities with the @Id annotation are supported. " +
-                    "Offending class is " + entityDotName);
+        if (!classInfo.annotations().containsKey(DotNames.JPA_ID)) {
+            if (DotNames.OBJECT.equals(classInfo.superName())) {
+                throw new IllegalArgumentException("Currently only Entities with the @Id annotation are supported. " +
+                        "Offending class is " + originalEntityDotName);
+            }
+            return getIdAnnotationTargetRec(classInfo.superName(), index, originalEntityDotName);
         }
 
-        List<AnnotationInstance> annotationInstances = entityClassInfo.annotations().get(DotNames.JPA_ID);
+        List<AnnotationInstance> annotationInstances = classInfo.annotations().get(DotNames.JPA_ID);
         if (annotationInstances.size() > 1) {
             throw new IllegalArgumentException(
                     "Currently the @Id annotation can only be placed on a single field or method. " +
-                            "Offending class is " + entityDotName);
+                            "Offending class is " + originalEntityDotName);
         }
 
         return annotationInstances.get(0).target();

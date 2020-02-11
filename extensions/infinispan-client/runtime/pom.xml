@@ -11,7 +11,7 @@
 
     <artifactId>quarkus-infinispan-client</artifactId>
     <name>Quarkus - Infinispan - Client - Runtime</name>
-
+    <description>Connect to the Infinispan data grid for distributed caching</description>
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -28,6 +28,14 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-netty</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jsonp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-elytron-security-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.wildfly.security</groupId>
@@ -54,10 +62,20 @@
             <artifactId>infinispan-client-hotrod</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>org.jboss.marshalling</groupId>
-                    <artifactId>jboss-marshalling-osgi</artifactId>
+                    <groupId>org.infinispan</groupId>
+                    <artifactId>infinispan-jboss-marshalling</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.jboss.spec.javax.transaction</groupId>
+                    <artifactId>
+                        jboss-transaction-api_1.2_spec
+                    </artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.transaction</groupId>
+            <artifactId>jakarta.transaction-api</artifactId>
         </dependency>
 
         <dependency>
@@ -75,7 +93,7 @@
             <artifactId>protostream-processor</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.oracle.substratevm</groupId>
+            <groupId>org.graalvm.nativeimage</groupId>
             <artifactId>svm</artifactId>
         </dependency>
     </dependencies>

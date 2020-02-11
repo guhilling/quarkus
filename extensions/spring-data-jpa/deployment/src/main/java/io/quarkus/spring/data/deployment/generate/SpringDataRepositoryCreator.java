@@ -19,6 +19,7 @@ import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.jandex.Type;
 
+import io.quarkus.deployment.util.HashUtil;
 import io.quarkus.deployment.util.JandexUtil;
 import io.quarkus.gizmo.ClassCreator;
 import io.quarkus.gizmo.ClassOutput;
@@ -37,14 +38,16 @@ public class SpringDataRepositoryCreator {
     private final DerivedMethodsAdder derivedMethodsAdder;
     private final CustomQueryMethodsAdder customQueryMethodsAdder;
 
-    public SpringDataRepositoryCreator(ClassOutput classOutput, IndexView index,
-            Consumer<String> fragmentImplClassResolvedCallback) {
+    public SpringDataRepositoryCreator(ClassOutput classOutput, ClassOutput otherClassOutput, IndexView index,
+            Consumer<String> fragmentImplClassResolvedCallback, Consumer<String> customClassCreatedCallback) {
         this.classOutput = classOutput;
         this.index = index;
         this.fragmentMethodsAdder = new FragmentMethodsAdder(fragmentImplClassResolvedCallback, index);
         this.stockMethodsAdder = new StockMethodsAdder(index);
         this.derivedMethodsAdder = new DerivedMethodsAdder(index);
-        this.customQueryMethodsAdder = new CustomQueryMethodsAdder();
+
+        // custom queries may generate non-bean classes
+        this.customQueryMethodsAdder = new CustomQueryMethodsAdder(index, otherClassOutput, customClassCreatedCallback);
     }
 
     public void implementCrudRepository(ClassInfo repositoryToImplement) {
@@ -73,10 +76,11 @@ public class SpringDataRepositoryCreator {
         }
 
         Map<String, FieldDescriptor> fragmentImplNameToFieldDescriptor = new HashMap<>();
-        String generatedClassName = repositoryToImplement.name().toString() + "Impl";
+        String repositoryToImplementStr = repositoryToImplement.name().toString();
+        String generatedClassName = repositoryToImplementStr + "_" + HashUtil.sha1(repositoryToImplementStr) + "Impl";
         try (ClassCreator classCreator = ClassCreator.builder().classOutput(classOutput)
                 .className(generatedClassName)
-                .interfaces(repositoryToImplement.name().toString())
+                .interfaces(repositoryToImplementStr)
                 .build()) {
             classCreator.addAnnotation(ApplicationScoped.class);
 
@@ -161,7 +165,7 @@ public class SpringDataRepositoryCreator {
         for (String customImplClassName : customImplClassNames) {
             FieldCreator customClassField = repositoryImpl
                     .getFieldCreator("customImplClass" + (i + 1), customImplClassName)
-                    .setModifiers(Modifier.PRIVATE);
+                    .setModifiers(Modifier.PROTECTED); // done to prevent warning during the build
             customClassField.addAnnotation(Inject.class);
 
             customImplNameToFieldDescriptor.put(customImplClassName,
